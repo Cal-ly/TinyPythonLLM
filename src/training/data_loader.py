@@ -23,56 +23,56 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from tokenization.character_tokenizer import CharacterTokenizer
-from ..utils.logger import get_logger
-
-logger = get_logger(__name__)
-
-
-class OptimizedTextDataset(Dataset):
-    """Memory-optimized dataset for RTX 4070 Mobile"""
-
-    def __init__(self, text: str, tokenizer: CharacterTokenizer, max_length: int):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
-        # Tokenize text once and store
-        self.tokens = tokenizer.encode(text)
-
-        # Pre-calculate valid starting positions
-        self.valid_starts = list(range(0, len(self.tokens) - max_length))
-
-        logger.info(f"Dataset created with {len(self.valid_starts)} sequences")
-
-    def __len__(self):
-        return len(self.valid_starts)
-
-    def __getitem__(self, idx):
-        start_idx = self.valid_starts[idx]
-
-        # Get input and target sequences
-        input_seq = self.tokens[start_idx : start_idx + self.max_length]
-        target_seq = self.tokens[start_idx + 1 : start_idx + self.max_length + 1]
-
-        return (
-            torch.tensor(input_seq, dtype=torch.long),
-            torch.tensor(target_seq, dtype=torch.long),
-        )
 
 
 def load_text(file_path: str) -> str:
-    """Load text from file with encoding detection"""
-    encodings = ["utf-8", "latin-1", "cp1252"]
+    """Load text from file."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
 
-    for encoding in encodings:
-        try:
-            with open(file_path, "r", encoding=encoding) as f:
-                text = f.read()
-            logger.info(f"Successfully loaded text with {encoding} encoding")
-            return text
-        except UnicodeDecodeError:
-            continue
 
-    raise ValueError(
+class TextDataset(Dataset):
+    def __init__(self, text: str, tokenizer: CharacterTokenizer, sequence_length: int):
+        self.tokenizer = tokenizer
+        self.sequence_length = sequence_length
+        self.tokens = tokenizer.encode(text)
+
+    def __len__(self):
+        return max(0, len(self.tokens) - self.sequence_length)
+
+    def __getitem__(self, idx):
+        # Get sequence of tokens
+        input_tokens = self.tokens[idx : idx + self.sequence_length]
+        target_tokens = self.tokens[idx + 1 : idx + self.sequence_length + 1]
+
+        return (
+            torch.tensor(input_tokens, dtype=torch.long),
+            torch.tensor(target_tokens, dtype=torch.long),
+        )
+
+
+def build_dataloaders(
+    text: str,
+    tokenizer: CharacterTokenizer,
+    sequence_length: int,
+    batch_size: int,
+    train_split: float = 0.9,
+) -> Tuple[DataLoader, DataLoader]:
+    """Build training and validation dataloaders."""
+    # Split text into train and validation
+    split_idx = int(len(text) * train_split)
+    train_text = text[:split_idx]
+    val_text = text[split_idx:]
+
+    # Create datasets
+    train_dataset = TextDataset(train_text, tokenizer, sequence_length)
+    val_dataset = TextDataset(val_text, tokenizer, sequence_length)
+
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader
         f"Could not decode file {file_path} with any of the attempted encodings"
     )
 

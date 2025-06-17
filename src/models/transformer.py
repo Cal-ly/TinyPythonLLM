@@ -22,7 +22,7 @@ import os
 import sys
 import math
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -39,128 +39,128 @@ from utils.config import ModelConfig
 
 logger = get_logger(__name__)
 
-class OptimizedMultiHeadAttention(nn.Module):
-    """Optimized Multi-Head Attention for RTX 4070 Mobile"""
-    
-    def __init__(self, d_model: int, nhead: int, dropout: float = 0.1):
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
-        assert d_model % nhead == 0
+        assert d_model % num_heads == 0
         
         self.d_model = d_model
-        self.nhead = nhead
-        self.head_dim = d_model // nhead
-        self.dropout = dropout
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
         
-        # Use single linear layer for efficiency
-        self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        self.query = nn.Linear(d_model, d_model)
+        self.key = nn.Linear(d_model, d_model)
+        self.value = nn.Linear(d_model, d_model)
+        self.output = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
         
-        # Initialize weights
-        nn.init.xavier_uniform_(self.qkv_proj.weight)
-        nn.init.xavier_uniform_(self.out_proj.weight)
-    
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size, seq_len, d_model = x.shape
         
-        # Compute Q, K, V in one go
-        qkv = self.qkv_proj(x)
-        qkv = qkv.reshape(batch_size, seq_len, 3, self.nhead, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch, nhead, seq_len, head_dim)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        # Generate Q, K, V
+        Q = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # Use Flash Attention if available (PyTorch 2.0+)
-        if hasattr(F, 'scaled_dot_product_attention'):
-            attn_output = F.scaled_dot_product_attention(
-                q, k, v, 
-                attn_mask=mask,
-                dropout_p=self.dropout if self.training else 0.0,
-                is_causal=True if mask is None else False
-            )
-        else:
-            # Fallback implementation
-            scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-            
-            if mask is not None:
-                scores = scores.masked_fill(mask == 0, -1e9)
-            
-            attn_weights = F.softmax(scores, dim=-1)
-            attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
-            attn_output = torch.matmul(attn_weights, v)
+        # Attention
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
         
-        # Reshape and project output
-        attn_output = attn_output.transpose(1, 2).contiguous().view(
-            batch_size, seq_len, d_model
-        )
+        attention = F.softmax(scores, dim=-1)
+        attention = self.dropout(attention)
         
-        return self.out_proj(attn_output)
+        out = torch.matmul(attention, V)
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+        
+        return self.output(out)
 
-class OptimizedTransformerBlock(nn.Module):
-    """Optimized Transformer block with memory efficiency"""
-    
-    def __init__(self, d_model: int, nhead: int, dim_feedforward: int, dropout: float = 0.1):
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
-        
-        self.attention = OptimizedMultiHeadAttention(d_model, nhead, dropout)
+        self.attention = MultiHeadAttention(d_model, num_heads, dropout)
         self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
         
-        # Optimized feedforward network
-        self.ffn = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
-            nn.GELU(),  # More efficient than ReLU for transformers
-            nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model),
+        self.feed_forward = nn.Sequential(
+            nn.Linear(d_model, 4 * d_model),
+            nn.ReLU(),
+            nn.Linear(4 * d_model, d_model),
             nn.Dropout(dropout)
         )
-        self.norm2 = nn.LayerNorm(d_model)
-    
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Pre-norm architecture for better training stability
-        attn_output = self.attention(self.norm1(x), mask)
-        x = x + attn_output
         
-        ffn_output = self.ffn(self.norm2(x))
-        x = x + ffn_output
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Self-attention with residual connection
+        attn_out = self.attention(x, mask)
+        x = self.norm1(x + attn_out)
+        
+        # Feed-forward with residual connection
+        ff_out = self.feed_forward(x)
+        x = self.norm2(x + ff_out)
         
         return x
 
 class Transformer(nn.Module):
-    """Optimized Transformer model for RTX 4070 Mobile"""
-    
-    def __init__(
-        self,
-        vocab_size: int,
-        d_model: int = 512,
-        nhead: int = 8,
-        num_layers: int = 6,
-        dim_feedforward: int = 2048,
-        dropout: float = 0.1,
-        max_seq_length: int = 512
-    ):
+    def __init__(self, config: ModelConfig):
         super().__init__()
+        self.config = config
+        self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
+        self.position_embedding = nn.Embedding(config.sequence_length, config.d_model)
         
-        self.d_model = d_model
-        self.max_seq_length = max_seq_length
-        
-        # Token and position embeddings
-        self.token_embedding = nn.Embedding(vocab_size, d_model)
-        self.position_embedding = nn.Embedding(max_seq_length, d_model)
-        self.dropout = nn.Dropout(dropout)
-        
-        # Transformer blocks
         self.blocks = nn.ModuleList([
-            OptimizedTransformerBlock(d_model, nhead, dim_feedforward, dropout)
-            for _ in range(num_layers)
+            TransformerBlock(config.d_model, config.num_heads, config.dropout)
+            for _ in range(config.num_layers)
         ])
         
-        # Output layer
-        self.ln_final = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, vocab_size, bias=False)
+        self.norm = nn.LayerNorm(config.d_model)
+        self.output = nn.Linear(config.d_model, config.vocab_size)
         
-        # Tie embeddings for parameter efficiency
-        self.head.weight = self.token_embedding.weight
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, seq_len = x.shape
         
-        # Initialize weights
-        self.apply(self._init_weights)
+        # Token embeddings
+        token_emb = self.token_embedding(x)
+        
+        # Position embeddings
+        positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
+        pos_emb = self.position_embedding(positions)
+        
+        # Combine embeddings
+        x = token_emb + pos_emb
+        
+        # Causal mask for autoregressive generation
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).unsqueeze(0).unsqueeze(0)
+        
+        # Pass through transformer blocks
+        for block in self.blocks:
+            x = block(x, mask)
+            
+        x = self.norm(x)
+        return self.output(x)
+    
+    def generate(self, input_ids: torch.Tensor, max_length: int = 100, temperature: float = 1.0) -> torch.Tensor:
+        """Generate text autoregressively."""
+        self.eval()
+        with torch.no_grad():
+            for _ in range(max_length):
+                # Get predictions for the current sequence
+                logits = self.forward(input_ids)
+                
+                # Get the logits for the last token
+                next_token_logits = logits[:, -1, :] / temperature
+                
+                # Sample from the distribution
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # Append to the sequence
+                input_ids = torch.cat([input_ids, next_token], dim=1)
+                
+                # Truncate if necessary to maintain sequence length
+                if input_ids.shape[1] > self.config.sequence_length:
+                    input_ids = input_ids[:, -self.config.sequence_length:]
+                    
+        return input_ids
     
     def _init_weights(self, module):
         """Initialize weights with optimal values for training"""

@@ -27,7 +27,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-# Add src to path if running from project root
+# Add src to path for imports
 current_dir = Path(__file__).parent
 src_dir = current_dir.parent
 if str(src_dir) not in sys.path:
@@ -35,139 +35,139 @@ if str(src_dir) not in sys.path:
 
 from models.transformer import Transformer
 from tokenization.character_tokenizer import CharacterTokenizer
-from .data_loader import build_dataloaders, load_text
+from utils.logger import get_logger
+from utils.config import TrainingConfig, ModelConfig
+from training.data_loader import build_dataloaders, load_text
 
-class GPUOptimizedTrainer:
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.device = self._setup_device()
-        self.scaler = torch.cuda.amp.GradScaler() if self.device.type == 'cuda' else None
-        self.compile_model = config.get('compile_model', True)
-        
-    def _setup_device(self):
-        """Setup device with RTX 4070 Mobile optimizations"""
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-            
-            # RTX 4070 Mobile specific optimizations
-            torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
-            torch.backends.cuda.matmul.allow_tf32 = True  # Enable TF32 for better performance
-            torch.backends.cudnn.allow_tf32 = True
-            
-            # Set memory fraction to leave room for system
-            torch.cuda.set_per_process_memory_fraction(0.9)
-            
-            print(f"Using GPU: {torch.cuda.get_device_name()}")
-            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-            
-            return device
-        else:
-            print("CUDA not available, using CPU")
-            return torch.device('cpu')
-    
-    def _get_optimal_batch_size(self, model, vocab_size: int, seq_length: int):
-        """Dynamically determine optimal batch size for RTX 4070 Mobile"""
-        if self.device.type != 'cuda':
-            return self.config.get('batch_size', 32)
-        
-        # Start with a reasonable batch size for RTX 4070 Mobile
-        test_batch_sizes = [64, 48, 32, 24, 16, 12, 8]
-        
-        for batch_size in test_batch_sizes:
-            try:
-                # Test memory usage with dummy data
-                dummy_input = torch.randint(0, vocab_size, (batch_size, seq_length)).to(self.device)
-                dummy_target = torch.randint(0, vocab_size, (batch_size, seq_length)).to(self.device)
-                
-                model.train()
-                with torch.cuda.amp.autocast():
-                    output = model(dummy_input)
-                    loss = nn.CrossEntropyLoss()(
-                        output.view(-1, vocab_size), 
-                        dummy_target.view(-1)
-                    )
-                
-                # Test backward pass
-                self.scaler.scale(loss).backward()
-                
-                # Check memory usage
-                memory_used = torch.cuda.memory_allocated() / 1e9
-                memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-                
-                print(f"Batch size {batch_size}: {memory_used:.1f}GB / {memory_total:.1f}GB used")
-                
-                if memory_used < memory_total * 0.85:  # Leave 15% headroom
-                    model.zero_grad()
-                    torch.cuda.empty_cache()
-                    return batch_size
-                    
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    torch.cuda.empty_cache()
-                    continue
-                else:
-                    raise e
-            finally:
-                model.zero_grad()
-                torch.cuda.empty_cache()
-        
-        return 8  # Fallback minimum
-    
-    def _setup_model_optimizations(self, model):
-        """Apply RTX 4070 Mobile specific model optimizations"""
-        if self.device.type == 'cuda':
-            # Enable gradient checkpointing to save memory
-            if hasattr(model, 'gradient_checkpointing_enable'):
-                model.gradient_checkpointing_enable()
-            
-            # Compile model for better performance (PyTorch 2.0+)
-            if self.compile_model and hasattr(torch, 'compile'):
-                try:
-                    model = torch.compile(model, mode='max-autotune')
-                    print("Model compiled for optimized performance")
-                except Exception as e:
-                    print(f"Model compilation failed: {e}")
-        
-        return model
+logger = get_logger(__name__)
 
-def create_model(config: Dict[str, Any], vocab_size: int, device: torch.device) -> nn.Module:
-    """Create and optimize model for RTX 4070 Mobile"""
-    model = Transformer(
-        vocab_size=vocab_size,
-        d_model=config['d_model'],
-        nhead=config['nhead'],
-        num_layers=config['num_layers'],
-        dim_feedforward=config.get('dim_feedforward', 4 * config['d_model']),
-        dropout=config.get('dropout', 0.1),
-        max_seq_length=config['max_seq_length']
-    ).to(device)
+def train_epoch(model: Transformer, train_loader: DataLoader, optimizer: optim.Optimizer, 
+                criterion: nn.Module, device: str) -> float:
+    """Train for one epoch."""
+    model.train()
+    total_loss = 0.0
+    num_batches = 0
     
-    return model
+    for batch_idx, (inputs, targets) in enumerate(train_loader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        
+        # Reshape for loss calculation
+        loss = criterion(outputs.view(-1, outputs.size(-1)), targets.view(-1))
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+        num_batches += 1
+        
+        if batch_idx % 100 == 0:
+            logger.info(f"Batch {batch_idx}, Loss: {loss.item():.4f}")
+    
+    return total_loss / num_batches
 
-def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Main training function with RTX 4070 Mobile optimizations"""
-    trainer = GPUOptimizedTrainer(config)
+def evaluate(model: Transformer, val_loader: DataLoader, criterion: nn.Module, device: str) -> float:
+    """Evaluate the model."""
+    model.eval()
+    total_loss = 0.0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for inputs, targets in val_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs.view(-1, outputs.size(-1)), targets.view(-1))
+            total_loss += loss.item()
+            num_batches += 1
+    
+    return total_loss / num_batches
+
+def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str] = None) -> Transformer:
+    """Main training function."""
+    # Setup
+    device = torch.device(config.device if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Using device: {device}")
+    
+    if save_dir:
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
     
     # Load and prepare data
-    print("Loading training data...")
-    text = load_text(config['data_path'])
+    logger.info(f"Loading data from {data_path}")
+    text = load_text(data_path)
+    logger.info(f"Loaded {len(text)} characters")
+    
+    # Build tokenizer
     tokenizer = CharacterTokenizer()
     tokenizer.fit(text)
+    logger.info(f"Vocabulary size: {tokenizer.vocab_size}")
     
-    # Build data loaders with optimal batch size
-    model = create_model(config, tokenizer.vocab_size, trainer.device)
-    
-    # Determine optimal batch size
-    optimal_batch_size = trainer._get_optimal_batch_size(
-        model, tokenizer.vocab_size, config['max_seq_length']
+    # Update config with vocab size
+    config.vocab_size = tokenizer.vocab_size
+    model_config = ModelConfig(
+        vocab_size=tokenizer.vocab_size,
+        d_model=config.d_model,
+        num_heads=config.num_heads,
+        num_layers=config.num_layers,
+        sequence_length=config.sequence_length,
+        dropout=config.dropout
     )
-    config['batch_size'] = optimal_batch_size
-    print(f"Using optimal batch size: {optimal_batch_size}")
     
-    # Apply model optimizations
-    model = trainer._setup_model_optimizations(model)
+    # Build dataloaders
+    train_loader, val_loader = build_dataloaders(
+        text, tokenizer, config.sequence_length, config.batch_size
+    )
+    logger.info(f"Created dataloaders: {len(train_loader)} train, {len(val_loader)} val batches")
     
-    # Build dataloaders with optimized settings
+    # Build model
+    model = Transformer(model_config).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    
+    logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    
+    # Training loop
+    best_val_loss = float('inf')
+    for epoch in range(config.max_epochs):
+        start_time = time.time()
+        
+        # Train
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        
+        # Evaluate
+        if epoch % config.eval_every == 0:
+            val_loss = evaluate(model, val_loader, criterion, device)
+            logger.info(f"Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            
+            # Save best model
+            if save_dir and val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save({
+                    'model_state_dict': model.state_dict(),
+                    'tokenizer': tokenizer,
+                    'config': model_config,
+                    'epoch': epoch,
+                    'val_loss': val_loss
+                }, save_path / 'best_model.pth')
+                logger.info(f"Saved best model with val loss: {val_loss:.4f}")
+        else:
+            logger.info(f"Epoch {epoch}: Train Loss: {train_loss:.4f}")
+        
+        # Save checkpoint
+        if save_dir and epoch % config.save_every == 0:
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'tokenizer': tokenizer,
+                'config': model_config,
+                'epoch': epoch,
+                'train_loss': train_loss
+            }, save_path / f'checkpoint_epoch_{epoch}.pth')
+        
+        epoch_time = time.time() - start_time
+        logger.info(f"Epoch {epoch} completed in {epoch_time:.2f}s")
+    
+    return model
     train_loader, val_loader = build_dataloaders(
         text, tokenizer, config['max_seq_length'], 
         config['batch_size'], num_workers=4, pin_memory=True

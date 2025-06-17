@@ -14,47 +14,48 @@ src_dir = project_root / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
+# Now import from the training module
 from training.train import run_training
+from utils.config import TrainingConfig
+from utils.logger import get_logger
 
 def main():
-    # RTX 4070 Mobile optimized configuration
-    config = {
-        # Data settings
-        'data_path': project_root / 'data' / 'shakespeare.txt',
-        
-        # Model architecture - optimized for RTX 4070 Mobile
-        'd_model': 512,              # Good balance of capacity and memory usage
-        'nhead': 8,                  # Efficient for 512 dimensions
-        'num_layers': 8,             # Increased from 6 for better performance
-        'dim_feedforward': 2048,     # 4x d_model standard ratio
-        'dropout': 0.1,
-        'max_seq_length': 256,       # Optimized for memory efficiency
-        
-        # Training settings
-        'num_epochs': 50,
-        'learning_rate': 3e-4,       # Optimal for transformer training
-        'weight_decay': 0.01,
-        'batch_size': 32,            # Will be auto-optimized
-        
-        # GPU optimizations
-        'compile_model': True,       # Enable PyTorch 2.0 compilation
-        'mixed_precision': True,     # Enable automatic mixed precision
-        
-        # Paths
-        'save_dir': project_root / 'models',
-    }
+    # Set up logging
+    logger = get_logger(__name__)
+    logger.info("Starting Shakespeare training")
     
-    print("Starting Shakespeare training with RTX 4070 Mobile optimizations...")
-    print(f"Configuration: {config}")
+    # Paths
+    data_path = project_root / "data" / "shakespeare.txt"
+    save_dir = project_root / "models" / "shakespeare"
     
+    # Verify data file exists
+    if not data_path.exists():
+        logger.error(f"Data file not found: {data_path}")
+        return
+    
+    # Training configuration
+    config = TrainingConfig(
+        batch_size=16,
+        learning_rate=1e-3,
+        max_epochs=50,
+        sequence_length=128,
+        d_model=256,
+        num_heads=8,
+        num_layers=4,
+        dropout=0.1,
+        save_every=5,
+        eval_every=2,
+        device='cuda' if os.name == 'nt' else 'cpu'  # Use CUDA on Windows if available
+    )
+    
+    logger.info(f"Training config: {config}")
+    
+    # Run training
     try:
-        metrics = run_training(config)
-        print("Training completed successfully!")
-        print(f"Final training loss: {metrics['losses'][-1]:.4f}")
-        print(f"Final validation loss: {metrics['val_losses'][-1]:.4f}")
-        
+        model = run_training(str(data_path), config, str(save_dir))
+        logger.info("Training completed successfully!")
     except Exception as e:
-        print(f"Training failed with error: {e}")
+        logger.error(f"Training failed: {e}")
         raise
 
 if __name__ == "__main__":
