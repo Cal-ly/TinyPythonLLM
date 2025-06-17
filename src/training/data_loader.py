@@ -1,54 +1,62 @@
-"""
-Dataset utilities.
+"""Dataset utilities for TinyPythonLLM.
 
-The raw text is first normalized and then split into
-training and validation sets. We produce short sequences of fixed length
-`seq_len`. The model learns to predict the next character for every
-position in these sequences.
+This module provides a small wrapper around :class:`torch.utils.data.Dataset`
+and :class:`DataLoader`.  Text is tokenized once and split into training
+and validation sets.  The dataset simply returns pairs of ``(input, target)``
+where ``target`` is the next-token prediction for ``input``.
 """
 
-import os
-import sys
-from pathlib import Path
-from typing import Tuple, List
-import random
+from typing import Tuple
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-# Add src to path for imports
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
+# Add ``src`` to ``sys.path`` so the module can be executed directly
+import sys
+from pathlib import Path as _Path
+_current_dir = _Path(__file__).parent
+_src_dir = _current_dir.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
 
 from tokenization.character_tokenizer import CharacterTokenizer
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
-def load_text(file_path: str) -> str:
-    """Load text from file."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        return f.read()
+class OptimizedTextDataset(Dataset):
+    """Dataset backed by a single tensor for efficient slicing."""
+
+    def __init__(self, text: str, tokenizer: CharacterTokenizer, seq_len: int) -> None:
+        self.seq_len = seq_len
+        tokens = tokenizer.encode(text)
+        self.tokens = torch.tensor(tokens, dtype=torch.long)
+        self.num_sequences = max(0, len(self.tokens) - seq_len)
+        logger.debug("Dataset created with %s sequences", self.num_sequences)
+
+    def __len__(self) -> int:
+        return self.num_sequences
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        start = idx
+        end = start + self.seq_len + 1
+        seq = self.tokens[start:end]
+        return seq[:-1], seq[1:]
 
 
-class TextDataset(Dataset):
-    def __init__(self, text: str, tokenizer: CharacterTokenizer, sequence_length: int):
-        self.tokenizer = tokenizer
-        self.sequence_length = sequence_length
-        self.tokens = tokenizer.encode(text)
-
-    def __len__(self):
-        return max(0, len(self.tokens) - self.sequence_length)
-
-    def __getitem__(self, idx):
-        # Get sequence of tokens
-        input_tokens = self.tokens[idx : idx + self.sequence_length]
-        target_tokens = self.tokens[idx + 1 : idx + self.sequence_length + 1]
-
-        return (
-            torch.tensor(input_tokens, dtype=torch.long),
-            torch.tensor(target_tokens, dtype=torch.long),
-        )
+def load_text(path: str) -> str:
+    """Load text from ``path`` using a set of common encodings."""
+    encodings = ["utf-8", "latin-1", "cp1252"]
+    for enc in encodings:
+        try:
+            with open(path, "r", encoding=enc) as f:
+                data = f.read()
+            logger.info("Loaded text using %s encoding", enc)
+            return data
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"Could not decode file {path} with tried encodings")
 
 
 def build_dataloaders(
@@ -57,68 +65,33 @@ def build_dataloaders(
     sequence_length: int,
     batch_size: int,
     train_split: float = 0.9,
-) -> Tuple[DataLoader, DataLoader]:
-    """Build training and validation dataloaders."""
-    # Split text into train and validation
-    split_idx = int(len(text) * train_split)
-    train_text = text[:split_idx]
-    val_text = text[split_idx:]
-
-    # Create datasets
-    train_dataset = TextDataset(train_text, tokenizer, sequence_length)
-    val_dataset = TextDataset(val_text, tokenizer, sequence_length)
-
-    # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-    return train_loader, val_loader
-        f"Could not decode file {file_path} with any of the attempted encodings"
-    )
-
-
-def build_dataloaders(
-    text: str,
-    tokenizer: CharacterTokenizer,
-    max_length: int,
-    batch_size: int,
-    train_split: float = 0.9,
-    num_workers: int = 4,
+    num_workers: int = 0,
     pin_memory: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
-    """Build optimized data loaders for RTX 4070 Mobile"""
+    """Create training and validation loaders from raw text."""
 
-    # Split text for train/validation
     split_idx = int(len(text) * train_split)
     train_text = text[:split_idx]
     val_text = text[split_idx:]
 
-    # Create datasets
-    train_dataset = OptimizedTextDataset(train_text, tokenizer, max_length)
-    val_dataset = OptimizedTextDataset(val_text, tokenizer, max_length)
+    train_ds = OptimizedTextDataset(train_text, tokenizer, sequence_length)
+    val_ds = OptimizedTextDataset(val_text, tokenizer, sequence_length)
 
-    # Create optimized data loaders
     train_loader = DataLoader(
-        train_dataset,
+        train_ds,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None,
     )
-
     val_loader = DataLoader(
-        val_dataset,
+        val_ds,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None,
     )
 
-    logger.info(f"Train loader: {len(train_loader)} batches")
-    logger.info(f"Val loader: {len(val_loader)} batches")
-
+    logger.info("Train loader: %s batches", len(train_loader))
+    logger.info("Val loader: %s batches", len(val_loader))
     return train_loader, val_loader
