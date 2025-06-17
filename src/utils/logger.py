@@ -17,10 +17,11 @@ def setup_logger(
     log_level: int = logging.INFO,
     log_file: Optional[str] = None,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
-    backup_count: int = 5
+    backup_count: int = 5,
+    console_output: bool = False  # Changed default to False
 ) -> logging.Logger:
     """
-    Set up a centralized logger with both file and console handlers.
+    Set up a centralized logger with file handler and optional console handler.
     
     Args:
         name: Logger name (default: "tinyllm")
@@ -28,6 +29,7 @@ def setup_logger(
         log_file: Path to log file (default: project_root/logs/tinyllm.log)
         max_bytes: Maximum log file size before rotation
         backup_count: Number of backup files to keep
+        console_output: Whether to also output to console (default: False)
         
     Returns:
         Configured logger instance
@@ -57,9 +59,6 @@ def setup_logger(
     file_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
     )
-    console_formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s"
-    )
     
     # File handler with rotation
     file_handler = logging.handlers.RotatingFileHandler(
@@ -67,25 +66,28 @@ def setup_logger(
     )
     file_handler.setLevel(log_level)
     file_handler.setFormatter(file_formatter)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(console_formatter)
-    
-    # Add handlers to logger
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    
+    # Optional console handler
+    if console_output:
+        console_formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
     
     return logger
 
 
-def get_logger(name: str = "tinyllm") -> logging.Logger:
+def get_logger(name: str = "tinyllm", console_output: bool = False) -> logging.Logger:
     """
     Get the centralized logger instance.
     
     Args:
         name: Logger name (should match the module name)
+        console_output: Whether to also output to console (default: False)
         
     Returns:
         Logger instance
@@ -94,7 +96,7 @@ def get_logger(name: str = "tinyllm") -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         # Set up logger if not already configured
-        return setup_logger(name)
+        return setup_logger(name, console_output=console_output)
     return logger
 
 

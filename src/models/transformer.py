@@ -25,6 +25,10 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ModelConfig:
@@ -92,6 +96,12 @@ class TransformerModel(nn.Module):
         # Final projection layer maps the transformer output back to vocabulary size
         self.lm_head = nn.Linear(config.d_model, config.vocab_size)
 
+        logger.debug(f"Initialized TransformerModel with {self._count_parameters()} parameters")
+
+    def _count_parameters(self) -> int:
+        """Count total number of trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass returning logits and hidden states."""
         # x: [batch, seq_len]
@@ -107,11 +117,36 @@ class TransformerModel(nn.Module):
     ) -> torch.Tensor:
         """Greedy/temperature-based generation for demo purposes."""
         self.eval()
+        logger.debug(f"Starting generation with {max_new_tokens} tokens, temperature={temperature}")
+
         ids = input_ids
-        for _ in range(max_new_tokens):
-            logits, _ = self.forward(ids)
-            next_token_logits = logits[:, -1, :] / temperature
-            probs = torch.softmax(next_token_logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            ids = torch.cat([ids, next_token], dim=1)
+        generated_tokens = 0
+        
+        with torch.no_grad():  # Add no_grad for inference
+            for step in range(max_new_tokens):
+                # Limit context window to prevent memory issues
+                context = ids[:, -512:] if ids.size(1) > 512 else ids
+                
+                logits, _ = self.forward(context)
+                next_token_logits = logits[:, -1, :] / temperature
+                
+                # Add small epsilon to prevent NaN issues
+                next_token_logits = next_token_logits + 1e-8
+                
+                # Apply softmax and sample
+                probs = torch.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # Check for valid token - fix the bug here
+                if next_token.item() >= self.config.vocab_size:
+                    logger.warning(f"Generated invalid token {next_token.item()}, stopping generation")
+                    break
+                
+                ids = torch.cat([ids, next_token], dim=1)
+                generated_tokens += 1
+                
+                if step > 0 and step % 20 == 0:
+                    logger.debug(f"Generation step {step}/{max_new_tokens}")
+
+        logger.debug(f"Generation completed, generated {generated_tokens} tokens, total sequence length: {ids.size(1)}")
         return ids

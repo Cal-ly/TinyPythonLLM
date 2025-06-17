@@ -20,12 +20,12 @@ def main():
     logger.info("Starting Shakespeare model training")
     
     # Path to the training data
-    data_path = Path("data/shakespeare25k.txt")
+    data_path = Path("data/shakespeare.txt")
     config = TrainingConfig()
     
     try:
         run_training(data_path, config)
-        logger.info("Training completed successfully")
+        logger.info("End of training process")
     except Exception as e:
         logger.error(f"Training failed with error: {e}")
         raise
