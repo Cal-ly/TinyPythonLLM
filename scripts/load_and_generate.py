@@ -52,7 +52,6 @@ def generate_text(prompt: str = "the", max_tokens: int = 200, temperature: float
         
         logger.info("Generated text:")
         logger.info(f"'{generated_text}'")
-        print(f"\nGenerated text:\n{generated_text}\n")
         
         return generated_text
         

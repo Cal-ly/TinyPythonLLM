@@ -61,7 +61,6 @@ def generate_samples():
             # Decode and display
             generated_text = tokenizer.decode(generated[0].tolist())
             logger.info(f"Generated: {generated_text}")
-            print(f"Generated: {generated_text}")  # Also print to console
         else:
             logger.warning(f"Prompt '{prompt_text}' contains unknown characters")
 

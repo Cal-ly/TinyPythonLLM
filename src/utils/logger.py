@@ -112,20 +112,4 @@ def configure_external_loggers():
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 
-# Default logger instance for convenience
-default_logger = get_logger()
 
-def get_logger(name: str = __name__, level: int = logging.INFO) -> logging.Logger:
-    """Create and configure a logger."""
-    logger = logging.getLogger(name)
-    
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(level)
-    
-    return logger
