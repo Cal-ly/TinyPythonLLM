@@ -180,24 +180,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                print(f"\n{generated}")
-                
-            except KeyboardInterrupt:
-                print("\nGoodbye!")
-                break
-            except Exception as e:
-                print(f"Error: {e}")
-
-def main():
-    """Main console function."""
-    import sys
-    
-    model_dir = "saved_models"
-    if len(sys.argv) > 1:
-        model_dir = sys.argv[1]
-    
-    console = TinyLLMConsole(model_dir)
-    console.run_interactive()
-
-if __name__ == "__main__":
-    main()
