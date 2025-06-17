@@ -2,21 +2,18 @@
 Interactive console interface for TinyPythonLLM.
 """
 
-import os
 import sys
 import torch
 from pathlib import Path
-from typing import Optional
 
-# Add src to path for imports
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
+# Add project root to ``sys.path`` for imports
+current_dir = Path(__file__).resolve().parent
+repo_root = current_dir.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from models.transformer import Transformer
 from tokenization.character_tokenizer import CharacterTokenizer
-from utils.config import ModelConfig
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,8 +37,13 @@ class TinyLLMConsole:
     def load_model(self, model_dir: str):
         """Load trained model and tokenizer."""
         logger.info(f"Loading model from {model_dir}")
-        
-        model_path = Path(model_dir) / "best_model.pth"
+
+        model_dir_path = Path(model_dir)
+        if not model_dir_path.is_absolute():
+            model_dir_path = repo_root / model_dir_path
+
+        # Default artifact produced by ``run_training``
+        model_path = model_dir_path / "shakespeare_model.pt"
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at {model_path}")
         
@@ -171,11 +173,11 @@ def main():
     """Main console function."""
     import sys
     
-    model_dir = "models"
+    model_dir = Path("models")
     if len(sys.argv) > 1:
-        model_dir = sys.argv[1]
-    
-    console = TinyLLMConsole(model_dir)
+        model_dir = Path(sys.argv[1])
+
+    console = TinyLLMConsole(str(model_dir))
     console.run_interactive()
 
 if __name__ == "__main__":

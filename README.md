@@ -56,9 +56,9 @@ python scripts/console.py [model_directory]
 
 ## 🚀 Getting Started
 
-1. **Train on Shakespeare dataset:**
+1. **Train a model:**
    ```bash
-   python scripts/train_shakespeare.py
+   python scripts/train.py data/shakespeare.txt
    ```
 
 2. **Launch interactive console:**
@@ -199,9 +199,9 @@ python scripts/console.py [model_directory]
 
 ## 🚀 Getting Started
 
-1. **Train on Shakespeare dataset:**
+1. **Train a model:**
    ```bash
-   python scripts/train_shakespeare.py
+   python scripts/train.py data/shakespeare.txt
    ```
 
 2. **Launch interactive console:**
