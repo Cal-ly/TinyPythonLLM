@@ -8,6 +8,7 @@ this logger for consistent formatting and centralized log management.
 
 import logging
 import logging.handlers
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -113,3 +114,18 @@ def configure_external_loggers():
 
 # Default logger instance for convenience
 default_logger = get_logger()
+
+def get_logger(name: str = __name__, level: int = logging.INFO) -> logging.Logger:
+    """Create and configure a logger."""
+    logger = logging.getLogger(name)
+    
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(level)
+    
+    return logger

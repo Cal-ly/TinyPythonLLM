@@ -4,21 +4,81 @@ A small-scale educational language model implementation in **Python + PyTorch**,
 
 ---
 
+## ⚙️ Training Configuration
+
+### `TrainingConfig` (in `src/utils/config.py`)
+
+Use `@dataclass` to define all hyperparameters:
+
+```python
+@dataclass
+class TrainingConfig:
+    epochs: int
+    batch_size: int
+    learning_rate: float
+    max_context: int
+    gradient_clip: float
+    val_split: float
+    sample_frequency: int
+    temperature: float
+    console_max_tokens: int
+    console_temperature: float
+    console_top_k: int
+```
+
+## 🔁 Training Loop
+
+### Core Loop (`src/training/train.py`)
+
+* For each epoch:
+  * Iterate over batches
+  * Compute loss (`torch.nn.CrossEntropyLoss`)
+  * Apply gradient clipping
+  * Backpropagation (`loss.backward()`)
+  * Optimizer step (`torch.optim.Adam`)
+* Validation split for monitoring
+* Sample generation at intervals
+* Checkpointing and early stopping
+* Save best model artifacts
+
+## 🎮 Interactive Console
+
+### Features
+* Real-time text generation
+* Adjustable parameters (temperature, max tokens, top-k)
+* Command interface for configuration
+* Model loading from saved artifacts
+
+### Usage
+```bash
+python scripts/console.py [model_directory]
+```
+
+## 🚀 Getting Started
+
+1. **Train on Shakespeare dataset:**
+   ```bash
+   python scripts/train_shakespeare.py
+   ```
+
+2. **Launch interactive console:**
+   ```bash
+   python scripts/console.py
+   ```
+
 ## 📁 Project Structure
 
 ```
-tinyllm_py/
-├── data/                        # Raw and preprocessed datasets (e.g., shakespeare.txt)
+TinyPythonLLM/
 ├── src/
-│   ├── tokenization/            # CharacterTokenizer (fit, encode, decode, save/load state)
-│   ├── models/                  # TransformerModel and layers (PyTorch modules)
-│   ├── training/                # Training loop, optimizer setup, validation
-│   ├── utils/                   # Logging, config loading, checkpointing
-├── scripts/
-│   └── train_shakespeare.py     # Main entry point for training
-├── tests/                       # Unit tests for tokenizer, model, training loop
-├── requirements.txt
-└── README.md
+│   ├── console/          # Interactive console
+│   ├── models/           # Transformer implementation
+│   ├── tokenization/     # Character tokenizer
+│   ├── training/         # Training utilities
+│   └── utils/           # Configuration and logging
+├── scripts/             # Training and console scripts
+├── data/               # Training datasets
+└── logs/               # Training logs
 ```
 
 ---
@@ -100,95 +160,68 @@ class TrainingConfig:
     batch_size: int
     learning_rate: float
     max_context: int
-    val_frequency: int
+    gradient_clip: float
+    val_split: float
     sample_frequency: int
     temperature: float
-    metrics_csv_enabled: bool
+    console_max_tokens: int
+    console_temperature: float
+    console_top_k: int
 ```
-
----
 
 ## 🔁 Training Loop
 
 ### Core Loop (`src/training/train.py`)
 
 * For each epoch:
-
   * Iterate over batches
   * Compute loss (`torch.nn.CrossEntropyLoss`)
+  * Apply gradient clipping
   * Backpropagation (`loss.backward()`)
   * Optimizer step (`torch.optim.Adam`)
-* Sample generation at intervals (controlled by config)
-* Validation using a fixed set of batches
-* Optional early stopping
-* Save best model via checkpoints
+* Validation split for monitoring
+* Sample generation at intervals
+* Checkpointing and early stopping
+* Save best model artifacts
+
+## 🎮 Interactive Console
+
+### Features
+* Real-time text generation
+* Adjustable parameters (temperature, max tokens, top-k)
+* Command interface for configuration
+* Model loading from saved artifacts
+
+### Usage
+```bash
+python scripts/console.py [model_directory]
+```
+
+## 🚀 Getting Started
+
+1. **Train on Shakespeare dataset:**
+   ```bash
+   python scripts/train_shakespeare.py
+   ```
+
+2. **Launch interactive console:**
+   ```bash
+   python scripts/console.py
+   ```
+
+## 📁 Project Structure
+
+```
+TinyPythonLLM/
+├── src/
+│   ├── console/          # Interactive console
+│   ├── models/           # Transformer implementation
+│   ├── tokenization/     # Character tokenizer
+│   ├── training/         # Training utilities
+│   └── utils/           # Configuration and logging
+├── scripts/             # Training and console scripts
+├── data/               # Training datasets
+└── logs/               # Training logs
+```
 
 ---
-
-## 🧾 Logging
-
-* Uses Python's built-in `logging` module
-* Logs to `tinyllm_training.log` by default
-* Optional `MetricsLogger` writes CSV-formatted metrics for plotting/tracking
-
----
-
-## ✍️ Text Generation
-
-* After training epochs (or per config), generate text from a fixed prompt
-* Sample using softmax temperature scaling
-* Used to monitor training quality in human-readable form
-
----
-
-## 🚀 Training Script
-
-### `scripts/train_shakespeare.py`
-
-* Loads dataset from `data/`
-* Builds tokenizer and model
-* Initializes training config
-* Starts training loop
-* Logs results, saves model, and prints sample outputs
-
----
-
-## 📖 Documentation
-
-### `README.md` should include:
-
-* Setup instructions:
-
-  ```bash
-  python -m venv .venv
-  source .venv/bin/activate
-  pip install -r requirements.txt
-  ```
-* How to run training:
-
-  ```bash
-  python scripts/train_shakespeare.py
-  ```
-* Where to find logs:
-
-  * Training: `tinyllm_training.log`
-  * Samples: printed to stdout or file
-  * Metrics: optional `metrics.csv`
-* Expected runtimes:
-
-  * Character-level model with Shakespeare: \~30–60 min per epoch
-  * Code datasets (future): \~1–3 hours depending on size
-
----
-
-## 🔮 Future Extensions
-
-* Add Byte Pair Encoding (BPE) or WordPiece tokenizer
-* Quantization for model compression
-* FP16 training
-* Larger transformer variants
-* Fine-tuning with your own data
-
----
-
-Would you like a cookiecutter template or zipped repo skeleton based on this layout?

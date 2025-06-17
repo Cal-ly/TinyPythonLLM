@@ -16,221 +16,300 @@ training state-of-the-art language models.
 """
 
 import os
+import sys
+import time
+import json
 from pathlib import Path
-from typing import Iterable
+from typing import Dict, Any, Optional, Tuple
 
 import torch
-from torch.nn import CrossEntropyLoss
-from torch.optim import Adam
-import torch.optim.lr_scheduler as lr_scheduler
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
 
+# Add src to path if running from project root
+current_dir = Path(__file__).parent
+src_dir = current_dir.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+
+from models.transformer import Transformer
+from tokenization.character_tokenizer import CharacterTokenizer
 from .data_loader import build_dataloaders, load_text
-from ..models.transformer import ModelConfig, TransformerModel
-from ..tokenization.character_tokenizer import CharacterTokenizer
-from ..utils.config import TrainingConfig
-from ..utils.logger import get_logger
 
-logger = get_logger(__name__)
-
-
-def save_model_artifacts(
-    model: TransformerModel, 
-    tokenizer: CharacterTokenizer, 
-    config: TrainingConfig, 
-    save_dir: str = "saved_models"
-) -> None:
-    """Save model, tokenizer, and configuration."""
-    save_path = Path(save_dir)
-    save_path.mkdir(exist_ok=True)
-    
-    # Save model state dict
-    model_path = save_path / "model.pt"
-    torch.save(model.state_dict(), model_path)
-    logger.info(f"Saved model to {model_path}")
-    
-    # Save tokenizer
-    tokenizer_path = save_path / "tokenizer.json"
-    tokenizer.save_state(str(tokenizer_path))
-    logger.info(f"Saved tokenizer to {tokenizer_path}")
-    
-    # Save model configuration
-    config_path = save_path / "model_config.pt"
-    torch.save({
-        'vocab_size': model.config.vocab_size,
-        'd_model': model.config.d_model,
-        'n_heads': model.config.n_heads,
-        'num_layers': model.config.num_layers,
-        'dropout': model.config.dropout
-    }, config_path)
-    logger.info(f"Saved model config to {config_path}")
-    
-    # Save training configuration
-    training_config_path = save_path / "training_config.pt"
-    torch.save({
-        'epochs': config.epochs,
-        'batch_size': config.batch_size,
-        'learning_rate': config.learning_rate,
-        'max_context': config.max_context,
-        'd_model': getattr(config, 'd_model', 128),
-        'n_heads': getattr(config, 'n_heads', 4),
-        'num_layers': getattr(config, 'num_layers', 2),
-        'sample_frequency': config.sample_frequency,
-        'temperature': config.temperature,
-        'max_new_tokens': config.max_new_tokens
-    }, training_config_path)
-    logger.info(f"Saved training config to {training_config_path}")
-
-
-def load_model_artifacts(save_dir: str = "saved_models"):
-    """Load saved model, tokenizer, and configuration."""
-    save_path = Path(save_dir)
-    
-    # Load model configuration
-    config_path = save_path / "model_config.pt"
-    model_config_data = torch.load(config_path)
-    model_config = ModelConfig(**model_config_data)
-    
-    # Load tokenizer
-    tokenizer = CharacterTokenizer()
-    tokenizer_path = save_path / "tokenizer.json"
-    tokenizer.load_state(str(tokenizer_path))
-    
-    # Create and load model
-    model = TransformerModel(model_config)
-    model_path = save_path / "model.pt"
-    model.load_state_dict(torch.load(model_path))
-    
-    # Load training configuration
-    training_config_path = save_path / "training_config.pt"
-    training_config_data = torch.load(training_config_path)
-    
-    logger.info(f"Loaded model artifacts from {save_dir}")
-    return model, tokenizer, model_config, training_config_data
-
-
-def train_epoch(
-    model: TransformerModel, data_loader: Iterable, loss_fn, optimizer, device
-) -> float:
-    model.train()
-    total_loss = 0.0
-    num_batches = len(data_loader)
-
-    for batch_idx, (x, y) in enumerate(data_loader):
-        x = x.to(device)
-        y = y.to(device)
-
-        logits, _ = model(x)
-        # Shift targets so each position predicts the next token
-        loss = loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        total_loss += loss.item()
-
-        if batch_idx % 50 == 0:
-            logger.debug(
-                "Training batch %d/%d, loss: %.4f",
-                batch_idx,
-                num_batches,
-                loss.item(),
-            )
-
-    avg_loss = total_loss / num_batches
-    logger.debug(
-        "Training epoch completed, average loss: %.4f",
-        avg_loss,
-    )
-    return avg_loss
-
-
-def validate(model: TransformerModel, data_loader: Iterable, loss_fn, device) -> float:
-    model.eval()
-    total_loss = 0.0
-    num_batches = len(data_loader)
-
-    with torch.no_grad():
-        for x, y in data_loader:
-            x = x.to(device)
-            y = y.to(device)
-            logits, _ = model(x)
-            loss = loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
-            total_loss += loss.item()
-
-    avg_loss = total_loss / num_batches
-    logger.debug(
-        "Validation completed, average loss: %.4f",
-        avg_loss,
-    )
-    return avg_loss
-
-
-def run_training(data_path: Path, config: TrainingConfig) -> TransformerModel:
-    logger.info("Starting training process")
-    logger.info(f"Data path: {data_path}")
-    logger.info(
-        f"Config: epochs={config.epochs}, batch_size={config.batch_size}, lr={config.learning_rate}"
-    )
-
-    # Load text and create tokenizer
-    raw_text = load_text(data_path)
-    logger.info(f"Loaded text with {len(raw_text)} characters")
-    
-    tokenizer = CharacterTokenizer()
-    tokenizer.fit(raw_text)
-
-    # Use config parameters for model architecture
-    model_cfg = ModelConfig(
-        vocab_size=len(tokenizer.itos), 
-        d_model=getattr(config, 'd_model', 128),
-        n_heads=getattr(config, 'n_heads', 4),
-        num_layers=getattr(config, 'num_layers', 2)
-    )
-    model = TransformerModel(model_cfg)
-    logger.info(
-        f"Created model with {sum(p.numel() for p in model.parameters())} parameters"
-    )
-
-    train_loader, val_loader = build_dataloaders(
-        raw_text, tokenizer, config.max_context, config.batch_size
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    logger.info(f"Using device: {device}")
-
-    loss_fn = CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=config.learning_rate)
-    
-    # Add learning rate scheduler - remove verbose parameter
-    scheduler = lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.8, patience=10
-    )
-
-    best_val_loss = float('inf')
-    patience_counter = 0
-    
-    for epoch in range(config.epochs):
-        # Only log epoch start every 10th epoch
-        if (epoch + 1) % 10 == 0:
-            logger.info(f"Starting epoch {epoch + 1}/{config.epochs}")
-
-        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
-        val_loss = validate(model, val_loader, loss_fn, device)
+class GPUOptimizedTrainer:
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.device = self._setup_device()
+        self.scaler = torch.cuda.amp.GradScaler() if self.device.type == 'cuda' else None
+        self.compile_model = config.get('compile_model', True)
         
-        # Step scheduler
-        scheduler.step(val_loss)
-        
-        # Early stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
-            # Save best model
-            torch.save(model.state_dict(), 'best_model.pt')
-        else:
-            patience_counter += 1
+    def _setup_device(self):
+        """Setup device with RTX 4070 Mobile optimizations"""
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
             
+            # RTX 4070 Mobile specific optimizations
+            torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
+            torch.backends.cuda.matmul.allow_tf32 = True  # Enable TF32 for better performance
+            torch.backends.cudnn.allow_tf32 = True
+            
+            # Set memory fraction to leave room for system
+            torch.cuda.set_per_process_memory_fraction(0.9)
+            
+            print(f"Using GPU: {torch.cuda.get_device_name()}")
+            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+            
+            return device
+        else:
+            print("CUDA not available, using CPU")
+            return torch.device('cpu')
+    
+    def _get_optimal_batch_size(self, model, vocab_size: int, seq_length: int):
+        """Dynamically determine optimal batch size for RTX 4070 Mobile"""
+        if self.device.type != 'cuda':
+            return self.config.get('batch_size', 32)
+        
+        # Start with a reasonable batch size for RTX 4070 Mobile
+        test_batch_sizes = [64, 48, 32, 24, 16, 12, 8]
+        
+        for batch_size in test_batch_sizes:
+            try:
+                # Test memory usage with dummy data
+                dummy_input = torch.randint(0, vocab_size, (batch_size, seq_length)).to(self.device)
+                dummy_target = torch.randint(0, vocab_size, (batch_size, seq_length)).to(self.device)
+                
+                model.train()
+                with torch.cuda.amp.autocast():
+                    output = model(dummy_input)
+                    loss = nn.CrossEntropyLoss()(
+                        output.view(-1, vocab_size), 
+                        dummy_target.view(-1)
+                    )
+                
+                # Test backward pass
+                self.scaler.scale(loss).backward()
+                
+                # Check memory usage
+                memory_used = torch.cuda.memory_allocated() / 1e9
+                memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+                
+                print(f"Batch size {batch_size}: {memory_used:.1f}GB / {memory_total:.1f}GB used")
+                
+                if memory_used < memory_total * 0.85:  # Leave 15% headroom
+                    model.zero_grad()
+                    torch.cuda.empty_cache()
+                    return batch_size
+                    
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    torch.cuda.empty_cache()
+                    continue
+                else:
+                    raise e
+            finally:
+                model.zero_grad()
+                torch.cuda.empty_cache()
+        
+        return 8  # Fallback minimum
+    
+    def _setup_model_optimizations(self, model):
+        """Apply RTX 4070 Mobile specific model optimizations"""
+        if self.device.type == 'cuda':
+            # Enable gradient checkpointing to save memory
+            if hasattr(model, 'gradient_checkpointing_enable'):
+                model.gradient_checkpointing_enable()
+            
+            # Compile model for better performance (PyTorch 2.0+)
+            if self.compile_model and hasattr(torch, 'compile'):
+                try:
+                    model = torch.compile(model, mode='max-autotune')
+                    print("Model compiled for optimized performance")
+                except Exception as e:
+                    print(f"Model compilation failed: {e}")
+        
+        return model
+
+def create_model(config: Dict[str, Any], vocab_size: int, device: torch.device) -> nn.Module:
+    """Create and optimize model for RTX 4070 Mobile"""
+    model = Transformer(
+        vocab_size=vocab_size,
+        d_model=config['d_model'],
+        nhead=config['nhead'],
+        num_layers=config['num_layers'],
+        dim_feedforward=config.get('dim_feedforward', 4 * config['d_model']),
+        dropout=config.get('dropout', 0.1),
+        max_seq_length=config['max_seq_length']
+    ).to(device)
+    
+    return model
+
+def run_training(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Main training function with RTX 4070 Mobile optimizations"""
+    trainer = GPUOptimizedTrainer(config)
+    
+    # Load and prepare data
+    print("Loading training data...")
+    text = load_text(config['data_path'])
+    tokenizer = CharacterTokenizer()
+    tokenizer.fit(text)
+    
+    # Build data loaders with optimal batch size
+    model = create_model(config, tokenizer.vocab_size, trainer.device)
+    
+    # Determine optimal batch size
+    optimal_batch_size = trainer._get_optimal_batch_size(
+        model, tokenizer.vocab_size, config['max_seq_length']
+    )
+    config['batch_size'] = optimal_batch_size
+    print(f"Using optimal batch size: {optimal_batch_size}")
+    
+    # Apply model optimizations
+    model = trainer._setup_model_optimizations(model)
+    
+    # Build dataloaders with optimized settings
+    train_loader, val_loader = build_dataloaders(
+        text, tokenizer, config['max_seq_length'], 
+        config['batch_size'], num_workers=4, pin_memory=True
+    )
+    
+    # Setup optimizer with RTX 4070 Mobile optimized settings
+    optimizer = optim.AdamW(
+        model.parameters(), 
+        lr=config['learning_rate'],
+        weight_decay=config.get('weight_decay', 0.01),
+        eps=1e-8,
+        betas=(0.9, 0.95)  # Optimized for transformer training
+    )
+    
+    # Learning rate scheduler
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config['num_epochs'], eta_min=config['learning_rate'] * 0.1
+    )
+    
+    criterion = nn.CrossEntropyLoss()
+    
+    # Training metrics
+    training_metrics = {
+        'epoch_times': [],
+        'losses': [],
+        'val_losses': [],
+        'gpu_memory_usage': [],
+        'throughput': []
+    }
+    
+    print(f"Starting training for {config['num_epochs']} epochs...")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    
+    for epoch in range(config['num_epochs']):
+        epoch_start_time = time.time()
+        
+        # Training phase
+        model.train()
+        epoch_loss = 0.0
+        num_batches = 0
+        tokens_processed = 0
+        
+        for batch_idx, (input_ids, target_ids) in enumerate(train_loader):
+            input_ids = input_ids.to(trainer.device, non_blocking=True)
+            target_ids = target_ids.to(trainer.device, non_blocking=True)
+            
+            optimizer.zero_grad(set_to_none=True)  # More efficient than zero_grad()
+            
+            # Mixed precision training
+            if trainer.scaler:
+                with torch.cuda.amp.autocast():
+                    outputs = model(input_ids)
+                    loss = criterion(outputs.view(-1, tokenizer.vocab_size), target_ids.view(-1))
+                
+                trainer.scaler.scale(loss).backward()
+                trainer.scaler.step(optimizer)
+                trainer.scaler.update()
+            else:
+                outputs = model(input_ids)
+                loss = criterion(outputs.view(-1, tokenizer.vocab_size), target_ids.view(-1))
+                loss.backward()
+                optimizer.step()
+            
+            epoch_loss += loss.item()
+            num_batches += 1
+            tokens_processed += input_ids.numel()
+            
+            # Log progress
+            if batch_idx % 10 == 0:
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Epoch {epoch+1}/{config['num_epochs']}, "
+                      f"Batch {batch_idx}/{len(train_loader)}, "
+                      f"Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+        
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        val_batches = 0
+        
+        with torch.no_grad():
+            for input_ids, target_ids in val_loader:
+                input_ids = input_ids.to(trainer.device, non_blocking=True)
+                target_ids = target_ids.to(trainer.device, non_blocking=True)
+                
+                if trainer.scaler:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(input_ids)
+                        loss = criterion(outputs.view(-1, tokenizer.vocab_size), target_ids.view(-1))
+                else:
+                    outputs = model(input_ids)
+                    loss = criterion(outputs.view(-1, tokenizer.vocab_size), target_ids.view(-1))
+                
+                val_loss += loss.item()
+                val_batches += 1
+        
+        scheduler.step()
+        
+        # Calculate metrics
+        epoch_time = time.time() - epoch_start_time
+        avg_loss = epoch_loss / num_batches
+        avg_val_loss = val_loss / val_batches if val_batches > 0 else 0
+        throughput = tokens_processed / epoch_time
+        
+        # GPU memory usage
+        if trainer.device.type == 'cuda':
+            gpu_memory = torch.cuda.max_memory_allocated() / 1e9
+            torch.cuda.reset_peak_memory_stats()
+        else:
+            gpu_memory = 0
+        
+        # Store metrics
+        training_metrics['epoch_times'].append(epoch_time)
+        training_metrics['losses'].append(avg_loss)
+        training_metrics['val_losses'].append(avg_val_loss)
+        training_metrics['gpu_memory_usage'].append(gpu_memory)
+        training_metrics['throughput'].append(throughput)
+        
+        print(f"Epoch {epoch+1} completed in {epoch_time:.2f}s")
+        print(f"Train Loss: {avg_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        print(f"Throughput: {throughput:.0f} tokens/sec, GPU Memory: {gpu_memory:.1f}GB")
+        print("-" * 50)
+    
+    # Save model and metrics
+    save_dir = Path(config.get('save_dir', 'models'))
+    save_dir.mkdir(exist_ok=True)
+    
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'tokenizer': tokenizer,
+        'config': config,
+        'training_metrics': training_metrics
+    }, save_dir / 'shakespeare_model.pt')
+    
+    print(f"Training completed! Model saved to {save_dir}")
+    print(f"Average throughput: {sum(training_metrics['throughput'])/len(training_metrics['throughput']):.0f} tokens/sec")
+    
+    return training_metrics
+
+if __name__ == "__main__":
+    # ...existing code...
         # Only log training progress every 10th epoch
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % config.log_frequency == 0:
             current_lr = optimizer.param_groups[0]['lr']
             logger.info(
                 f"Epoch {epoch + 1} - train: {train_loss:.4f}, val: {val_loss:.4f}, lr: {current_lr:.6f}"
@@ -273,18 +352,8 @@ def run_training(data_path: Path, config: TrainingConfig) -> TransformerModel:
                 logger.error(f"Failed to generate sample text: {e}")
         
         # Save checkpoints periodically
-        if (epoch + 1) % 50 == 0:
-            checkpoint_path = f"checkpoint_epoch_{epoch+1}.pt"
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'tokenizer_vocab': tokenizer.itos,
-                'config': config
-            }, checkpoint_path)
-            logger.info(f"Saved checkpoint: {checkpoint_path}")
+        if (epoch + 1) % config.checkpoint_frequency == 0:
+            save_checkpoint(model, tokenizer, optimizer, scheduler, epoch, train_loss, val_loss, config)
         
         # Early stopping
         if patience_counter > 20:

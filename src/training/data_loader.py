@@ -7,80 +7,118 @@ training and validation sets. We produce short sequences of fixed length
 position in these sequences.
 """
 
+import os
+import sys
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
+import random
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from ..tokenization.character_tokenizer import CharacterTokenizer
+# Add src to path for imports
+current_dir = Path(__file__).parent
+src_dir = current_dir.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+
+from tokenization.character_tokenizer import CharacterTokenizer
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def load_text(path: Path) -> str:
-    """Load raw text file, applying minimal preprocessing."""
-    logger.info(f"Loading text from {path}")
-    text = path.read_text(encoding="utf-8")
-    original_length = len(text)
+class OptimizedTextDataset(Dataset):
+    """Memory-optimized dataset for RTX 4070 Mobile"""
 
-    # Basic normalization to reduce vocabulary size
-    text = " ".join(text.split())
-    text = text.lower()
+    def __init__(self, text: str, tokenizer: CharacterTokenizer, max_length: int):
+        self.tokenizer = tokenizer
+        self.max_length = max_length
 
-    logger.info(
-        f"Loaded and normalized text: {original_length} -> {len(text)} characters"
-    )
-    return text
+        # Tokenize text once and store
+        self.tokens = tokenizer.encode(text)
 
+        # Pre-calculate valid starting positions
+        self.valid_starts = list(range(0, len(self.tokens) - max_length))
 
-class CharDataset(Dataset):
-    """Simple dataset producing sequences of fixed length for language modeling."""
+        logger.info(f"Dataset created with {len(self.valid_starts)} sequences")
 
-    def __init__(self, data: torch.Tensor, seq_len: int):
-        self.data = data
-        self.seq_len = seq_len
-        logger.debug(
-            f"Created CharDataset with {len(self)} sequences of length {seq_len}"
+    def __len__(self):
+        return len(self.valid_starts)
+
+    def __getitem__(self, idx):
+        start_idx = self.valid_starts[idx]
+
+        # Get input and target sequences
+        input_seq = self.tokens[start_idx : start_idx + self.max_length]
+        target_seq = self.tokens[start_idx + 1 : start_idx + self.max_length + 1]
+
+        return (
+            torch.tensor(input_seq, dtype=torch.long),
+            torch.tensor(target_seq, dtype=torch.long),
         )
 
-    def __len__(self) -> int:
-        return self.data.size(0) - self.seq_len
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        chunk = self.data[idx : idx + self.seq_len + 1]
-        return chunk[:-1], chunk[1:]
+def load_text(file_path: str) -> str:
+    """Load text from file with encoding detection"""
+    encodings = ["utf-8", "latin-1", "cp1252"]
+
+    for encoding in encodings:
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                text = f.read()
+            logger.info(f"Successfully loaded text with {encoding} encoding")
+            return text
+        except UnicodeDecodeError:
+            continue
+
+    raise ValueError(
+        f"Could not decode file {file_path} with any of the attempted encodings"
+    )
 
 
 def build_dataloaders(
-    text: str, tokenizer: CharacterTokenizer, seq_len: int, batch_size: int
+    text: str,
+    tokenizer: CharacterTokenizer,
+    max_length: int,
+    batch_size: int,
+    train_split: float = 0.9,
+    num_workers: int = 4,
+    pin_memory: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
-    """Create DataLoaders for training and validation."""
-    logger.info(
-        f"Building dataloaders with seq_len={seq_len}, batch_size={batch_size}"
+    """Build optimized data loaders for RTX 4070 Mobile"""
+
+    # Split text for train/validation
+    split_idx = int(len(text) * train_split)
+    train_text = text[:split_idx]
+    val_text = text[split_idx:]
+
+    # Create datasets
+    train_dataset = OptimizedTextDataset(train_text, tokenizer, max_length)
+    val_dataset = OptimizedTextDataset(val_text, tokenizer, max_length)
+
+    # Create optimized data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
 
-    ids = torch.tensor(tokenizer.encode(text), dtype=torch.long)
-    logger.info(f"Tokenized text to {len(ids)} tokens")
-
-    # 90/10 train/val split
-    split = int(0.9 * len(ids))
-    train_ids = ids[:split]
-    val_ids = ids[split:]
-
-    logger.info(
-        f"Split data: {len(train_ids)} train tokens, {len(val_ids)} val tokens"
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
 
-    train_ds = CharDataset(train_ids, seq_len)
-    val_ds = CharDataset(val_ids, seq_len)
-
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size)
-
-    logger.info(
-        f"Created dataloaders: {len(train_loader)} train batches, {len(val_loader)} val batches"
-    )
+    logger.info(f"Train loader: {len(train_loader)} batches")
+    logger.info(f"Val loader: {len(val_loader)} batches")
 
     return train_loader, val_loader

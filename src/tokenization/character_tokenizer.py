@@ -7,40 +7,40 @@ as sequences of numbers that can be fed to the model. Although simplistic,
 this mirrors early NLP approaches and keeps the vocabulary small.
 """
 
-import json
+import os
+import sys
+from pathlib import Path
 from typing import List, Dict
 
-from ..utils.logger import get_logger
-
-logger = get_logger(__name__)
+# Add src to path for imports
+current_dir = Path(__file__).parent
+src_dir = current_dir.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 
 class CharacterTokenizer:
-    """Character-level tokenizer.
-
-    This simple tokenizer assigns a unique integer index to each character in
-    the training corpus. It's equivalent to mapping a vocabulary of characters
-    to indices and back. While overly simplistic for real-world language
-    modeling, it's a great educational starting point
-    """
+    """Character-level tokenizer for text processing."""
 
     def __init__(self):
-        # mapping from character to integer id
-        self.stoi: Dict[str, int] = {}
-        # reverse mapping from id to character
-        self.itos: List[str] = []
-        logger.debug("Initialized CharacterTokenizer")
+        self.char_to_idx: Dict[str, int] = {}
+        self.idx_to_char: Dict[int, str] = {}
+        self.vocab_size = 0
 
     def fit(self, text: str) -> None:
-        """Build vocabulary from given text."""
+        """Build vocabulary from text."""
         unique_chars = sorted(set(text))
-        self.stoi = {ch: i for i, ch in enumerate(unique_chars)}
-        self.itos = unique_chars
-        logger.info(f"Built vocabulary with {len(unique_chars)} unique characters")
-        logger.debug(f"Characters: {unique_chars}")
+        self.char_to_idx = {char: idx for idx, char in enumerate(unique_chars)}
+        self.idx_to_char = {idx: char for idx, char in enumerate(unique_chars)}
+        self.vocab_size = len(unique_chars)
 
     def encode(self, text: str) -> List[int]:
-        """Convert text to list of token ids."""
+        """Convert text to token indices."""
+        return [self.char_to_idx.get(char, 0) for char in text]
+
+    def decode(self, tokens: List[int]) -> str:
+        """Convert token indices to text."""
+        return "".join([self.idx_to_char.get(token, "") for token in tokens])
         encoded = [self.stoi[ch] for ch in text]
         logger.debug(f"Encoded text of length {len(text)} to {len(encoded)} tokens")
         return encoded
