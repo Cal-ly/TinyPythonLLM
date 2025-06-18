@@ -4,7 +4,7 @@ Interactive console interface for TinyPythonLLM.
 
 import torch
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from .transformer import Transformer
 from .character_tokenizer import CharacterTokenizer
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class TinyLLMConsole:
     """Interactive console for TinyPythonLLM."""
     
-    def __init__(self, model_dir: str = "trained_models"):
+    def __init__(self, model_path: Optional[str] = None):
         """Initialize console with trained model."""
         self.model = None
         self.tokenizer = None
@@ -24,56 +24,79 @@ class TinyLLMConsole:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         try:
-            self.load_model(model_dir)
+            self.load_model(model_path)
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             print(f"Failed to load model: {e}")
             self.model = None
     
-    def load_model(self, model_dir: str):
+    def find_model_files(self, search_dir: str = "trained_models") -> List[Path]:
+        """Find all model files in directory."""
+        search_path = Path(search_dir)
+        model_files = []
+        
+        if search_path.exists() and search_path.is_dir():
+            # Look for any .pt files
+            model_files.extend(search_path.glob("*_model.pt"))
+            model_files.extend(search_path.glob("*.pt"))
+        
+        return sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True)  # Most recent first
+    
+    def auto_discover_model(self) -> Optional[Path]:
+        """Auto-discover the most recent model file."""
+        search_dirs = ["trained_models", ".", "models"]
+        
+        for search_dir in search_dirs:
+            model_files = self.find_model_files(search_dir)
+            if model_files:
+                print(f"Found {len(model_files)} model(s) in {search_dir}:")
+                for i, model_file in enumerate(model_files):
+                    print(f"  {i+1}. {model_file.name}")
+                
+                # Return the most recent one
+                return model_files[0]
+        
+        return None
+    
+    def load_model(self, model_path: Optional[str] = None):
         """Load trained model and tokenizer."""
-        logger.info(f"Loading model from {model_dir}")
-        print(f"Looking for model in: {model_dir}")
-
-        # Try different model file locations
-        possible_paths = [
-            Path(model_dir) / "shakespeare_model.pt",
-            Path(model_dir),  # If model_dir is actually a file path
-            Path("trained_models") / "shakespeare_model.pt",
-            Path(".") / "shakespeare_model.pt",
-            Path("models") / "shakespeare_model.pt"
-        ]
-        
-        model_path = None
-        for path in possible_paths:
-            if path.exists() and path.is_file():
-                model_path = path
-                break
-        
         if model_path is None:
-            # List available files for debugging
-            search_dirs = [model_dir, "trained_models", ".", "models"]
-            print("Model not found. Searched in:")
-            for search_dir in search_dirs:
-                dir_path = Path(search_dir)
-                if dir_path.exists() and dir_path.is_dir():
-                    files = list(dir_path.glob("*.pt"))
-                    print(f"  {search_dir}: {[f.name for f in files] if files else 'no .pt files'}")
-                else:
-                    print(f"  {search_dir}: directory not found")
+            print("No model path specified, auto-discovering...")
+            model_file = self.auto_discover_model()
+            if model_file is None:
+                raise FileNotFoundError("No model files found. Train a model first!")
+        else:
+            model_file = Path(model_path)
             
-            raise FileNotFoundError(f"Model not found. Tried: {[str(p) for p in possible_paths]}")
+            # If it's a directory, find models in it
+            if model_file.is_dir():
+                model_files = self.find_model_files(str(model_file))
+                if not model_files:
+                    raise FileNotFoundError(f"No model files found in {model_file}")
+                model_file = model_files[0]  # Most recent
+                print(f"Found model: {model_file.name}")
+            
+            # If it's a file path but doesn't exist, try to find it
+            elif not model_file.exists():
+                # Maybe they gave just a filename
+                for search_dir in ["trained_models", ".", "models"]:
+                    candidate = Path(search_dir) / model_file.name
+                    if candidate.exists():
+                        model_file = candidate
+                        break
+                else:
+                    raise FileNotFoundError(f"Model file not found: {model_path}")
         
-        print(f"Loading model from: {model_path}")
+        logger.info(f"Loading model from {model_file}")
+        print(f"Loading model: {model_file}")
         
-        # Handle PyTorch 2.6+ security changes - try weights_only=False for custom classes
+        # Handle PyTorch 2.6+ security changes
         try:
-            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+            checkpoint = torch.load(model_file, map_location=self.device, weights_only=False)
         except Exception as e:
             logger.error(f"Failed to load with weights_only=False: {e}")
-            # If that fails, try the old default behavior
             try:
-                checkpoint = torch.load(model_path, map_location=self.device)
+                checkpoint = torch.load(model_file, map_location=self.device)
             except Exception as e2:
                 raise RuntimeError(f"Failed to load model: {e2}")
         
@@ -86,10 +109,14 @@ class TinyLLMConsole:
         self.model.to(self.device)
         self.model.eval()
         
+        # Print model info
+        dataset_name = checkpoint.get('dataset_name', 'unknown')
+        print(f"✅ Model loaded successfully!")
+        print(f"📊 Dataset: {dataset_name}")
+        print(f"🔤 Vocabulary size: {self.tokenizer.vocab_size}")
+        print(f"🧠 Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        
         logger.info("Model loaded successfully!")
-        print("Model loaded successfully!")
-        print(f"Vocabulary size: {self.tokenizer.vocab_size}")
-        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
     
     def generate_text(self, prompt: str, max_tokens: int = 100, temperature: float = 0.8) -> str:
         """Generate text from prompt."""
@@ -123,7 +150,8 @@ class TinyLLMConsole:
     def run_interactive(self):
         """Run interactive console loop."""
         if self.model is None:
-            print("Error: No model loaded. Please train a model first.")
+            print("❌ Error: No model loaded. Please train a model first.")
+            print("💡 Run: python scripts/start_training.py data/your_file.txt")
             return
         
         print("\n🧠 TinyPythonLLM Interactive Console")
@@ -149,8 +177,41 @@ class TinyLLMConsole:
                 
                 # Handle commands
                 if prompt.startswith('/'):
-                    if self._handle_command(prompt, max_tokens, temperature):
+                    cmd_parts = prompt.split()
+                    cmd = cmd_parts[0].lower()
+                    
+                    if cmd == '/quit':
+                        print("Goodbye!")
                         break
+                    elif cmd == '/help':
+                        print("\nCommands:")
+                        print("  /help    - Show this help")
+                        print("  /temp X  - Set temperature to X (0.1-2.0)")
+                        print("  /tokens X - Set max tokens to X")
+                        print("  /quit    - Exit")
+                    elif cmd == '/temp' and len(cmd_parts) > 1:
+                        try:
+                            new_temp = float(cmd_parts[1])
+                            if 0.1 <= new_temp <= 2.0:
+                                temperature = new_temp
+                                print(f"Temperature set to {temperature}")
+                            else:
+                                print("Temperature must be between 0.1 and 2.0")
+                        except ValueError:
+                            print("Invalid temperature value")
+                    elif cmd == '/tokens' and len(cmd_parts) > 1:
+                        try:
+                            new_tokens = int(cmd_parts[1])
+                            if 1 <= new_tokens <= 500:
+                                max_tokens = new_tokens
+                                print(f"Max tokens set to {max_tokens}")
+                            else:
+                                print("Max tokens must be between 1 and 500")
+                        except ValueError:
+                            print("Invalid token count")
+                    else:
+                        print("Unknown command. Type /help for available commands.")
+                    
                     continue
                 
                 # Generate text
@@ -164,65 +225,16 @@ class TinyLLMConsole:
             except Exception as e:
                 print(f"Error: {e}")
 
-    def _handle_command(self, prompt: str, max_tokens: int, temperature: float) -> bool:
-        """Handle console commands. Returns True if should exit."""
-        cmd_parts = prompt.split()
-        cmd = cmd_parts[0].lower()
-        
-        if cmd == '/quit':
-            print("Goodbye!")
-            return True
-        elif cmd == '/help':
-            print("\nCommands:")
-            print("  /help    - Show this help")
-            print("  /temp X  - Set temperature to X (0.1-2.0)")
-            print("  /tokens X - Set max tokens to X")
-            print("  /quit    - Exit")
-        elif cmd == '/temp' and len(cmd_parts) > 1:
-            try:
-                new_temp = float(cmd_parts[1])
-                if 0.1 <= new_temp <= 2.0:
-                    temperature = new_temp
-                    print(f"Temperature set to {temperature}")
-                else:
-                    print("Temperature must be between 0.1 and 2.0")
-            except ValueError:
-                print("Invalid temperature value")
-        elif cmd == '/tokens' and len(cmd_parts) > 1:
-            try:
-                new_tokens = int(cmd_parts[1])
-                if 1 <= new_tokens <= 500:
-                    max_tokens = new_tokens
-                    print(f"Max tokens set to {max_tokens}")
-                else:
-                    print("Max tokens must be between 1 and 500")
-            except ValueError:
-                print("Invalid token count")
-        else:
-            print("Unknown command. Type /help for available commands.")
-        
-        return False
-
 
 def main():
     """Main console function for direct script execution."""
     import sys
     
-    model_dir = "trained_models"
-    model_name = None
-    
+    model_path = None
     if len(sys.argv) > 1:
-        if sys.argv[1].endswith('.pt') or '_model' in sys.argv[1]:
-            # Specific model file provided
-            model_name = sys.argv[1]
-        else:
-            # Directory provided
-            model_dir = sys.argv[1]
-    
-    if len(sys.argv) > 2:
-        model_name = sys.argv[2]
+        model_path = sys.argv[1]
 
-    console = TinyLLMConsole(model_dir, model_name)
+    console = TinyLLMConsole(model_path)
     console.run_interactive()
 
 

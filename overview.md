@@ -7,6 +7,9 @@ TinyPythonLLM is a minimal character-level language model implemented in Python 
 ```
 TinyPythonLLM/
 ├── data/               # Sample text corpora for training
+├── scripts/            # Entry point scripts
+│   ├── start_training.py  # Training script with argument parsing
+│   └── start_console.py   # Interactive console launcher
 ├── src/                # Library source code
 │   ├── __init__.py     # Package initialization
 │   ├── character_tokenizer.py    # Character-level tokenization
@@ -19,6 +22,38 @@ TinyPythonLLM/
 │   └── transformer.py  # Core transformer implementation
 ├── trained_models/     # Saved checkpoints
 └── ...
+```
+
+## Entry Point Scripts
+
+### `scripts/start_training.py`
+Command-line interface for training models with:
+* **Argument parsing** – supports all training parameters via command line
+* **Path resolution** – handles relative/absolute paths for data files
+* **Error handling** – validates data files exist and shows available alternatives
+* **Model naming** – automatically names models after dataset (e.g., `shakespeare25k.txt` → `shakespeare25k_model.pt`)
+* **Progress display** – shows training configuration and expected output location
+
+Usage patterns:
+```bash
+python scripts/start_training.py data/shakespeare25k.txt
+python scripts/start_training.py data/my_text.txt --epochs 10 --batch_size 64
+```
+
+### `scripts/start_console.py` 
+Interactive console launcher with intelligent model discovery:
+* **Auto-discovery** – finds models in `trained_models/` when no argument provided
+* **Smart path resolution** – handles model filenames, full paths, and directory arguments
+* **Multi-location search** – searches `trained_models/`, `models/`, current directory
+* **Clear feedback** – shows what it's looking for and where it found models
+* **Error handling** – graceful failures with helpful error messages
+
+Usage patterns:
+```bash
+python scripts/start_console.py                    # Auto-discover
+python scripts/start_console.py shakespeare25k_model.pt    # By filename
+python scripts/start_console.py trained_models/    # By directory
+python scripts/start_console.py /path/to/model.pt  # Full path
 ```
 
 ## High Level Components
@@ -85,22 +120,34 @@ The project primarily depends on:
 ## Interactions Between Modules
 
 - **Training Pipeline:**
-  1. `train_model.run_training` loads text via `data_loader.load_text`
-  2. Builds a `CharacterTokenizer` and constructs the `Transformer` with `ModelConfig`
-  3. `data_loader.build_dataloaders` provides DataLoader objects for training
-  4. Training loop uses mixed precision and saves checkpoints with model state, tokenizer, and metrics
+  1. `scripts/start_training.py` parses arguments and validates data files
+  2. `train_model.run_training` loads text via `data_loader.load_text`
+  3. Builds a `CharacterTokenizer` and constructs the `Transformer` with `ModelConfig`
+  4. `data_loader.build_dataloaders` provides DataLoader objects for training
+  5. Training loop uses mixed precision and saves checkpoints with model state, tokenizer, and metrics
+  6. Models are automatically named after the dataset (e.g., `shakespeare25k_model.pt`)
 
 - **Interactive Usage:**
-  - `interactive.TinyLLMConsole` loads saved checkpoints from various locations
-  - Automatically searches common directories (trained_models, models, current directory)
-  - Uses `CharacterTokenizer` to encode/decode text
-  - Generates text via `Transformer.generate` method
+  1. `scripts/start_console.py` parses arguments and discovers model locations
+  2. `interactive.TinyLLMConsole` loads saved checkpoints from discovered locations
+  3. Automatically searches common directories with intelligent path resolution
+  4. Uses `CharacterTokenizer` to encode/decode text
+  5. Generates text via `Transformer.generate` method
 
 - **Programmatic Generation:**
   - `generate_text` module provides simple functions to load models and generate text
   - Can be used for batch processing or integration into other applications
 
+## Workflow Improvements
+
+The entry point scripts provide:
+- **Consistent module loading** – both use the same `sys.path` approach
+- **Intelligent path handling** – resolve relative paths, search multiple locations
+- **User-friendly feedback** – clear output about what's happening
+- **Error recovery** – helpful suggestions when things go wrong
+- **Flexible usage** – support both simple and advanced use cases
+
 All modules use the centralized `logger` for consistent output formatting and log management.
 
 ---
-This overview reflects the current flat structure within the `src/` directory and the actual implementation of the TinyPythonLLM project.
+This overview reflects the improved script architecture and the actual implementation of the TinyPythonLLM project with its intelligent model discovery and user-friendly command-line interface.
