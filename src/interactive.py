@@ -4,6 +4,7 @@ Interactive console interface for TinyPythonLLM.
 
 import torch
 from pathlib import Path
+from typing import Optional
 
 from .transformer import Transformer
 from .character_tokenizer import CharacterTokenizer
@@ -26,17 +27,55 @@ class TinyLLMConsole:
             self.load_model(model_dir)
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
+            print(f"Failed to load model: {e}")
             self.model = None
     
     def load_model(self, model_dir: str):
         """Load trained model and tokenizer."""
         logger.info(f"Loading model from {model_dir}")
+        print(f"Looking for model in: {model_dir}")
 
-        model_path = Path(model_dir) / "shakespeare_model.pt"
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model not found at {model_path}")
+        # Try different model file locations
+        possible_paths = [
+            Path(model_dir) / "shakespeare_model.pt",
+            Path(model_dir),  # If model_dir is actually a file path
+            Path("trained_models") / "shakespeare_model.pt",
+            Path(".") / "shakespeare_model.pt",
+            Path("models") / "shakespeare_model.pt"
+        ]
         
-        checkpoint = torch.load(model_path, map_location=self.device)
+        model_path = None
+        for path in possible_paths:
+            if path.exists() and path.is_file():
+                model_path = path
+                break
+        
+        if model_path is None:
+            # List available files for debugging
+            search_dirs = [model_dir, "trained_models", ".", "models"]
+            print("Model not found. Searched in:")
+            for search_dir in search_dirs:
+                dir_path = Path(search_dir)
+                if dir_path.exists() and dir_path.is_dir():
+                    files = list(dir_path.glob("*.pt"))
+                    print(f"  {search_dir}: {[f.name for f in files] if files else 'no .pt files'}")
+                else:
+                    print(f"  {search_dir}: directory not found")
+            
+            raise FileNotFoundError(f"Model not found. Tried: {[str(p) for p in possible_paths]}")
+        
+        print(f"Loading model from: {model_path}")
+        
+        # Handle PyTorch 2.6+ security changes - try weights_only=False for custom classes
+        try:
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+        except Exception as e:
+            logger.error(f"Failed to load with weights_only=False: {e}")
+            # If that fails, try the old default behavior
+            try:
+                checkpoint = torch.load(model_path, map_location=self.device)
+            except Exception as e2:
+                raise RuntimeError(f"Failed to load model: {e2}")
         
         # Reconstruct model
         self.config = checkpoint['config']
@@ -48,8 +87,9 @@ class TinyLLMConsole:
         self.model.eval()
         
         logger.info("Model loaded successfully!")
-        logger.info(f"Vocabulary size: {self.tokenizer.vocab_size}")
-        logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters())}")
+        print("Model loaded successfully!")
+        print(f"Vocabulary size: {self.tokenizer.vocab_size}")
+        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
     
     def generate_text(self, prompt: str, max_tokens: int = 100, temperature: float = 0.8) -> str:
         """Generate text from prompt."""
@@ -169,10 +209,20 @@ def main():
     import sys
     
     model_dir = "trained_models"
+    model_name = None
+    
     if len(sys.argv) > 1:
-        model_dir = sys.argv[1]
+        if sys.argv[1].endswith('.pt') or '_model' in sys.argv[1]:
+            # Specific model file provided
+            model_name = sys.argv[1]
+        else:
+            # Directory provided
+            model_dir = sys.argv[1]
+    
+    if len(sys.argv) > 2:
+        model_name = sys.argv[2]
 
-    console = TinyLLMConsole(model_dir)
+    console = TinyLLMConsole(model_dir, model_name)
     console.run_interactive()
 
 

@@ -1,79 +1,106 @@
 # Repository Overview: TinyPythonLLM
 
-TinyPythonLLM is a minimal character-level language model implemented in Python using PyTorch. The project mirrors the structure of a companion C# version and demonstrates how to train and interact with a transformer-based model.
+TinyPythonLLM is a minimal character-level language model implemented in Python using PyTorch. This project demonstrates how to train and interact with a transformer-based model for educational purposes.
 
 ## Directory Structure
 
 ```
 TinyPythonLLM/
 ├── data/               # Sample text corpora for training
-├── scripts/            # Command line entry points
 ├── src/                # Library source code
-│   ├── console/        # Interactive console implementation
-│   ├── inference/      # Helper for text generation
-│   ├── models/         # Transformer architecture
-│   ├── tokenization/   # Character tokenizer
-│   ├── training/       # Data loader and training loop
-│   └── utils/          # Config and logging helpers
+│   ├── __init__.py     # Package initialization
+│   ├── character_tokenizer.py    # Character-level tokenization
+│   ├── data_loader.py  # Dataset utilities and data loading
+│   ├── dataclass_config.py       # Configuration dataclasses
+│   ├── generate_text.py           # Text generation utilities
+│   ├── interactive.py  # Interactive console interface
+│   ├── logger.py       # Centralized logging utility
+│   ├── train_model.py  # Training loop and utilities
+│   └── transformer.py  # Core transformer implementation
 ├── trained_models/     # Saved checkpoints
 └── ...
 ```
 
 ## High Level Components
 
-### `src/tokenization/character_tokenizer.py`
-Defines the **`CharacterTokenizer`** class. It maps characters to integer ids and vice versa, with methods `fit`, `encode`, `decode`, `save_state`, and `load_state`【F:src/tokenization/character_tokenizer.py†L14-L48】.
-Other modules rely on this tokenizer for preprocessing text.
+### `src/character_tokenizer.py`
+Defines the **`CharacterTokenizer`** class that maps characters to integer ids and vice versa. Provides methods for `fit`, `encode`, `decode`, `save_state`, and `load_state` to handle character-level tokenization for the language model.
 
-### `src/models/transformer.py`
-Implements a minimal Transformer. Key classes:
-* **`MultiHeadAttention`** – scaled dot-product attention with dropout
-* **`TransformerBlock`** – attention + feed‑forward with residuals
-* **`Transformer`** – token and positional embeddings, a stack of blocks, and generation logic【F:src/models/transformer.py†L26-L183】.
-Uses configuration from `utils.config.ModelConfig` and logs via `utils.logger`.
+### `src/transformer.py`
+Implements the core Transformer architecture with key classes:
+* **`MultiHeadAttention`** – scaled dot-product attention with multiple heads and dropout
+* **`TransformerBlock`** – combines attention and feed-forward layers with residual connections
+* **`Transformer`** – complete model with token/positional embeddings, transformer blocks, and text generation capabilities
+Uses causal masking for autoregressive generation and includes optimized generation methods.
 
-### `src/training/data_loader.py`
-Provides `OptimizedTextDataset` and `build_dataloaders` to load text, tokenize it, and return `DataLoader` objects for training and validation【F:src/training/data_loader.py†L18-L89】.
+### `src/data_loader.py`
+Provides data loading utilities including:
+* **`OptimizedTextDataset`** – efficient dataset backed by tensors for sequence slicing
+* **`build_dataloaders`** – creates training and validation DataLoaders from raw text
+* **`load_text`** – robust text loading with multiple encoding fallbacks
 
-### `src/training/train.py`
-Contains the main training routine `run_training`, along with helper functions `train_epoch` and `evaluate` for one epoch and validation respectively【F:src/training/train.py†L16-L203】. The function builds the tokenizer, dataloaders, model, optimizer, and scheduler, then iterates over epochs and saves the trained checkpoint.
+### `src/train_model.py`
+Contains the complete training pipeline with:
+* **`run_training`** – main training function that orchestrates the entire process
+* **`train_epoch`** and **`evaluate`** – training and validation loops with mixed precision support
+* Model checkpointing, metrics tracking, and learning rate scheduling
 
-### `src/console/interactive.py`
-Provides `TinyLLMConsole`, an interactive REPL for generating text with a trained model. It loads a checkpoint, accepts user commands, and prints generated sequences【F:src/console/interactive.py†L1-L188】.
+### `src/interactive.py`
+Provides **`TinyLLMConsole`** class for interactive text generation:
+* Loads trained models from multiple possible locations with intelligent path resolution
+* Provides a command-line interface with helpful error messages and debugging info
+* Supports temperature control, token limits, and various generation parameters
+* Interactive commands for adjusting generation settings
 
-### `src/inference/generate.py`
-Utility for programmatic generation. Functions `load_model` and `generate_text` load the checkpoint and produce output given a prompt【F:src/inference/generate.py†L1-L31】.
+### `src/generate_text.py`
+Utility functions for programmatic text generation:
+* **`load_model`** – loads saved model checkpoints
+* **`generate_text`** – generates text from prompts using trained models
 
-### `src/utils/config.py`
-Defines dataclasses **`ModelConfig`** and **`TrainingConfig`**, specifying hyperparameters such as model depth, sequence length, learning rate, and console settings【F:src/utils/config.py†L1-L46】.
+### `src/dataclass_config.py`
+Defines configuration dataclasses:
+* **`ModelConfig`** – model architecture parameters (vocab_size, d_model, num_heads, etc.)
+* **`TrainingConfig`** – training hyperparameters and generation settings
 
-### `src/utils/logger.py`
-Centralized logger setup used across the project. `setup_logger`, `get_logger`, and `configure_external_loggers` configure rotating file logs and optional console output【F:src/utils/logger.py†L1-L112】.
+### `src/logger.py`
+Centralized logging system with:
+* **`setup_logger`** and **`get_logger`** – configure rotating file logs and optional console output
+* **`configure_external_loggers`** – reduces verbosity of external libraries
+* Logs to both files and console with configurable formatting
 
-## Scripts
+## Package Structure
 
-* **`scripts/train.py`** – command line interface to start model training using `run_training` and `TrainingConfig`【F:scripts/train.py†L1-L31】.
-* **`scripts/console.py`** – entry point that launches the interactive console from `src.console.interactive`【F:scripts/console.py†L1-L13】.
-
-## Data and Checkpoints
-
-The `data/` directory contains sample Shakespeare text files used for experiments, while `trained_models/` stores saved checkpoints such as `shakespeare_model.pt`.
+The `src/__init__.py` file provides convenient imports for the main classes:
+- `Transformer` from transformer module
+- `CharacterTokenizer` from character_tokenizer module  
+- `ModelConfig` and `TrainingConfig` from dataclass_config module
 
 ## Dependencies
 
-Listed in `requirements.txt`, the project primarily depends on `torch`, `numpy`, and `tqdm`【F:requirements.txt†L1-L4】. The optional `setup.sh` script creates a virtual environment and installs these packages【F:setup.sh†L1-L10】.
+The project primarily depends on:
+- `torch` – PyTorch for neural network implementation
+- `numpy` – numerical computations
+- Standard library modules for logging, data structures, and file I/O
 
 ## Interactions Between Modules
 
 - **Training Pipeline:**
-  1. `training.train.run_training` loads text via `data_loader.load_text`, builds a `CharacterTokenizer`, and constructs the `Transformer` with a `ModelConfig`.
-  2. `data_loader.build_dataloaders` provides `DataLoader` objects used by `train_epoch` and `evaluate`.
-  3. After training, the checkpoint (model state, tokenizer, config) is saved to `trained_models/` and later consumed by the console or inference utilities.
+  1. `train_model.run_training` loads text via `data_loader.load_text`
+  2. Builds a `CharacterTokenizer` and constructs the `Transformer` with `ModelConfig`
+  3. `data_loader.build_dataloaders` provides DataLoader objects for training
+  4. Training loop uses mixed precision and saves checkpoints with model state, tokenizer, and metrics
 
-- **Console and Inference:**
-  - `console.interactive.TinyLLMConsole` and `inference.generate` both load checkpoints, decode user prompts with `CharacterTokenizer`, and generate tokens via `Transformer.generate`.
+- **Interactive Usage:**
+  - `interactive.TinyLLMConsole` loads saved checkpoints from various locations
+  - Automatically searches common directories (trained_models, models, current directory)
+  - Uses `CharacterTokenizer` to encode/decode text
+  - Generates text via `Transformer.generate` method
 
-Logging is handled through `utils.logger`, which is imported by most modules to keep output consistent.
+- **Programmatic Generation:**
+  - `generate_text` module provides simple functions to load models and generate text
+  - Can be used for batch processing or integration into other applications
+
+All modules use the centralized `logger` for consistent output formatting and log management.
 
 ---
-This overview outlines the purpose of each major file and how they connect, giving both developers and language models a quick reference to navigate the repository.
+This overview reflects the current flat structure within the `src/` directory and the actual implementation of the TinyPythonLLM project.

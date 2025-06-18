@@ -5,11 +5,9 @@ import sys
 from pathlib import Path
 
 # Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from train_model import run_training
-from dataclass_config import TrainingConfig
-from logger import get_logger
+from src import run_training, TrainingConfig, get_logger
 
 
 def parse_args() -> argparse.Namespace:

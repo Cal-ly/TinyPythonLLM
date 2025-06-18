@@ -122,6 +122,9 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
     text = load_text(data_path)
     logger.info(f"Loaded {len(text)} characters")
     
+    # Extract dataset name from file path for model naming
+    dataset_name = Path(data_path).stem  # Gets filename without extension
+    
     # Build tokenizer
     tokenizer = CharacterTokenizer()
     tokenizer.fit(text)
@@ -189,15 +192,18 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
 
     # Save model
     if save_path:
+        model_filename = f"{dataset_name}_model.pt"
         torch.save(
             {
                 "model_state_dict": model.state_dict(),
                 "tokenizer": tokenizer,
                 "config": model_config,
                 "training_metrics": metrics,
+                "dataset_name": dataset_name,
+                "data_path": data_path,
             },
-            save_path / "shakespeare_model.pt",
+            save_path / model_filename,
         )
-        logger.info(f"Training completed! Model saved to {save_path}")
+        logger.info(f"Training completed! Model saved to {save_path / model_filename}")
 
     return model

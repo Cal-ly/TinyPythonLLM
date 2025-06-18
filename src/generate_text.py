@@ -1,6 +1,7 @@
 """Utilities for generating text with a trained TinyPythonLLM model."""
 
 from typing import Tuple
+from pathlib import Path
 
 import torch
 
@@ -10,7 +11,22 @@ from .character_tokenizer import CharacterTokenizer
 
 def load_model(model_path: str) -> Tuple[Transformer, CharacterTokenizer]:
     """Load a Transformer model and tokenizer from ``model_path``."""
-    checkpoint = torch.load(model_path, map_location="cpu")
+    model_file = Path(model_path)
+    
+    # If directory provided, auto-discover model
+    if model_file.is_dir():
+        model_files = list(model_file.glob("*_model.pt"))
+        if model_files:
+            model_file = model_files[0]
+        else:
+            # Fallback to old naming convention
+            fallback = model_file / "shakespeare_model.pt"
+            if fallback.exists():
+                model_file = fallback
+            else:
+                raise FileNotFoundError(f"No model files found in {model_path}")
+    
+    checkpoint = torch.load(model_file, map_location="cpu")
     config = checkpoint["config"]
     model = Transformer(config)
     model.load_state_dict(checkpoint["model_state_dict"])

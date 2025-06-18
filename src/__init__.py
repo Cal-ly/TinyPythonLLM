@@ -3,60 +3,52 @@
 __version__ = "0.1.0"
 __author__ = "TinyLLM Team"
 
-# Import main classes for easy access
-from .transformer import Transformer
+# Core model classes
+from .transformer import Transformer, MultiHeadAttention, TransformerBlock
 from .character_tokenizer import CharacterTokenizer
+
+# Configuration classes
 from .dataclass_config import ModelConfig, TrainingConfig
 
-__all__ = [
-    "Transformer",
-    "CharacterTokenizer", 
-    "ModelConfig",
-    "TrainingConfig",
-]
-
-"""Model implementations for TinyPythonLLM."""
-
-from .transformer import Transformer
-
-__all__ = ["Transformer"]
-
-
-"""Tokenization utilities for TinyPythonLLM."""
-
-from .character_tokenizer import CharacterTokenizer
-
-__all__ = ["CharacterTokenizer"]
-
-
-"""Training utilities for TinyPythonLLM."""
-
-from .train_model import run_training
+# Training utilities
+from .train_model import run_training, train_epoch, evaluate
 from .data_loader import build_dataloaders, load_text, OptimizedTextDataset
 
-__all__ = ["run_training", "build_dataloaders", "load_text", "OptimizedTextDataset"]
-
-
-"""Utility modules for TinyPythonLLM."""
-
-from .dataclass_config import ModelConfig, TrainingConfig
-from .logger import get_logger, setup_logger
-
-__all__ = ["ModelConfig", "TrainingConfig", "get_logger", "setup_logger"]
-
-
-"""Interactive console for TinyPythonLLM."""
-
-from .interactive import TinyLLMConsole
-
-__all__ = ["TinyLLMConsole"]
-
-
-"""Inference utilities for TinyPythonLLM."""
-
+# Generation utilities
 from .generate_text import load_model, generate_text
 
-__all__ = ["load_model", "generate_text"]
+# Interactive console
+from .interactive import TinyLLMConsole
 
+# Logging utilities
+from .logger import get_logger, setup_logger, configure_external_loggers
 
-"""Command line scripts for TinyPythonLLM."""
+__all__ = [
+    # Core model classes
+    "Transformer",
+    "MultiHeadAttention", 
+    "TransformerBlock",
+    "CharacterTokenizer",
+    
+    # Configuration
+    "ModelConfig",
+    "TrainingConfig",
+    
+    # Training
+    "run_training",
+    "train_epoch",
+    "evaluate",
+    "build_dataloaders",
+    "load_text",
+    "OptimizedTextDataset",
+    
+    # Generation and interaction
+    "load_model",
+    "generate_text",
+    "TinyLLMConsole",
+    
+    # Utilities
+    "get_logger",
+    "setup_logger",
+    "configure_external_loggers",
+]
