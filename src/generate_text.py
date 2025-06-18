@@ -4,8 +4,8 @@ from typing import Tuple
 
 import torch
 
-from models.transformer import Transformer
-from tokenization.character_tokenizer import CharacterTokenizer
+from .transformer import Transformer
+from .character_tokenizer import CharacterTokenizer
 
 
 def load_model(model_path: str) -> Tuple[Transformer, CharacterTokenizer]:

@@ -5,13 +5,9 @@ Interactive console interface for TinyPythonLLM.
 import torch
 from pathlib import Path
 
-# Add src directory to path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-# Import necessary modules
-from models.transformer import Transformer
-from tokenization.character_tokenizer import CharacterTokenizer
-from utils.logger import get_logger
+from .transformer import Transformer
+from .character_tokenizer import CharacterTokenizer
+from .logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,11 +33,6 @@ class TinyLLMConsole:
         logger.info(f"Loading model from {model_dir}")
 
         model_path = Path(model_dir) / "shakespeare_model.pt"
-        if not model_path.exists():
-            # Try relative to repo root
-            repo_root = Path(__file__).parent.parent.parent
-            model_path = repo_root / model_dir / "shakespeare_model.pt"
-            
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at {model_path}")
         
@@ -174,7 +165,7 @@ class TinyLLMConsole:
 
 
 def main():
-    """Main console function."""
+    """Main console function for direct script execution."""
     import sys
     
     model_dir = "trained_models"

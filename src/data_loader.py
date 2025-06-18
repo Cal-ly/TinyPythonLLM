@@ -11,8 +11,8 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from tokenization.character_tokenizer import CharacterTokenizer
-from utils.logger import get_logger
+from .character_tokenizer import CharacterTokenizer
+from .logger import get_logger
 
 logger = get_logger(__name__)
 

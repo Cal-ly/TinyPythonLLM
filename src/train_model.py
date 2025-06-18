@@ -25,11 +25,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.amp import GradScaler, autocast
 
-from models.transformer import Transformer
-from tokenization.character_tokenizer import CharacterTokenizer
-from utils.logger import get_logger
-from utils.config import TrainingConfig, ModelConfig
-from training.data_loader import build_dataloaders, load_text
+from .transformer import Transformer
+from .character_tokenizer import CharacterTokenizer
+from .logger import get_logger
+from .dataclass_config import TrainingConfig, ModelConfig
+from .data_loader import build_dataloaders, load_text
 
 logger = get_logger(__name__)
 
