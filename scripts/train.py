@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train TinyPythonLLM")
     parser.add_argument("data", type=str, help="Path to training text file")
     parser.add_argument(
-        "--output_dir", type=str, default="models", help="Directory to save model"
+        "--output_dir", type=str, default="trained_models", help="Directory to save model"
     )
     return parser.parse_args()
 

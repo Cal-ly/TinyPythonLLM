@@ -5,6 +5,10 @@ Interactive console interface for TinyPythonLLM.
 import torch
 from pathlib import Path
 
+# Add src directory to path
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Import necessary modules
 from models.transformer import Transformer
 from tokenization.character_tokenizer import CharacterTokenizer
 from utils.logger import get_logger
@@ -15,7 +19,7 @@ logger = get_logger(__name__)
 class TinyLLMConsole:
     """Interactive console for TinyPythonLLM."""
     
-    def __init__(self, model_dir: str = "models"):
+    def __init__(self, model_dir: str = "trained_models"):
         """Initialize console with trained model."""
         self.model = None
         self.tokenizer = None
@@ -173,7 +177,7 @@ def main():
     """Main console function."""
     import sys
     
-    model_dir = "models"
+    model_dir = "trained_models"
     if len(sys.argv) > 1:
         model_dir = sys.argv[1]
 
