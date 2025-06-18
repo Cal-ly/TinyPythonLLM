@@ -2,21 +2,15 @@
 Interactive console interface for TinyPythonLLM.
 """
 
-import sys
 import torch
 from pathlib import Path
-
-# Add project root to ``sys.path`` for imports
-current_dir = Path(__file__).resolve().parent
-repo_root = current_dir.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
 
 from models.transformer import Transformer
 from tokenization.character_tokenizer import CharacterTokenizer
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
 
 class TinyLLMConsole:
     """Interactive console for TinyPythonLLM."""
@@ -38,12 +32,12 @@ class TinyLLMConsole:
         """Load trained model and tokenizer."""
         logger.info(f"Loading model from {model_dir}")
 
-        model_dir_path = Path(model_dir)
-        if not model_dir_path.is_absolute():
-            model_dir_path = repo_root / model_dir_path
-
-        # Default artifact produced by ``run_training``
-        model_path = model_dir_path / "shakespeare_model.pt"
+        model_path = Path(model_dir) / "shakespeare_model.pt"
+        if not model_path.exists():
+            # Try relative to repo root
+            repo_root = Path(__file__).parent.parent.parent
+            model_path = repo_root / model_dir / "shakespeare_model.pt"
+            
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at {model_path}")
         
@@ -85,7 +79,6 @@ class TinyLLMConsole:
             
             # Decode
             generated_text = self.tokenizer.decode(generated_ids[0].tolist())
-            
             return generated_text
             
         except Exception as e:
@@ -121,41 +114,8 @@ class TinyLLMConsole:
                 
                 # Handle commands
                 if prompt.startswith('/'):
-                    cmd_parts = prompt.split()
-                    cmd = cmd_parts[0].lower()
-                    
-                    if cmd == '/quit':
-                        print("Goodbye!")
+                    if self._handle_command(prompt, max_tokens, temperature):
                         break
-                    elif cmd == '/help':
-                        print("\nCommands:")
-                        print("  /help    - Show this help")
-                        print("  /temp X  - Set temperature to X (0.1-2.0)")
-                        print("  /tokens X - Set max tokens to X")
-                        print("  /quit    - Exit")
-                    elif cmd == '/temp' and len(cmd_parts) > 1:
-                        try:
-                            new_temp = float(cmd_parts[1])
-                            if 0.1 <= new_temp <= 2.0:
-                                temperature = new_temp
-                                print(f"Temperature set to {temperature}")
-                            else:
-                                print("Temperature must be between 0.1 and 2.0")
-                        except ValueError:
-                            print("Invalid temperature value")
-                    elif cmd == '/tokens' and len(cmd_parts) > 1:
-                        try:
-                            new_tokens = int(cmd_parts[1])
-                            if 1 <= new_tokens <= 500:
-                                max_tokens = new_tokens
-                                print(f"Max tokens set to {max_tokens}")
-                            else:
-                                print("Max tokens must be between 1 and 500")
-                        except ValueError:
-                            print("Invalid token count")
-                    else:
-                        print("Unknown command. Type /help for available commands.")
-                    
                     continue
                 
                 # Generate text
@@ -169,16 +129,57 @@ class TinyLLMConsole:
             except Exception as e:
                 print(f"Error: {e}")
 
+    def _handle_command(self, prompt: str, max_tokens: int, temperature: float) -> bool:
+        """Handle console commands. Returns True if should exit."""
+        cmd_parts = prompt.split()
+        cmd = cmd_parts[0].lower()
+        
+        if cmd == '/quit':
+            print("Goodbye!")
+            return True
+        elif cmd == '/help':
+            print("\nCommands:")
+            print("  /help    - Show this help")
+            print("  /temp X  - Set temperature to X (0.1-2.0)")
+            print("  /tokens X - Set max tokens to X")
+            print("  /quit    - Exit")
+        elif cmd == '/temp' and len(cmd_parts) > 1:
+            try:
+                new_temp = float(cmd_parts[1])
+                if 0.1 <= new_temp <= 2.0:
+                    temperature = new_temp
+                    print(f"Temperature set to {temperature}")
+                else:
+                    print("Temperature must be between 0.1 and 2.0")
+            except ValueError:
+                print("Invalid temperature value")
+        elif cmd == '/tokens' and len(cmd_parts) > 1:
+            try:
+                new_tokens = int(cmd_parts[1])
+                if 1 <= new_tokens <= 500:
+                    max_tokens = new_tokens
+                    print(f"Max tokens set to {max_tokens}")
+                else:
+                    print("Max tokens must be between 1 and 500")
+            except ValueError:
+                print("Invalid token count")
+        else:
+            print("Unknown command. Type /help for available commands.")
+        
+        return False
+
+
 def main():
     """Main console function."""
     import sys
     
-    model_dir = Path("models")
+    model_dir = "models"
     if len(sys.argv) > 1:
-        model_dir = Path(sys.argv[1])
+        model_dir = sys.argv[1]
 
-    console = TinyLLMConsole(str(model_dir))
+    console = TinyLLMConsole(model_dir)
     console.run_interactive()
+
 
 if __name__ == "__main__":
     main()

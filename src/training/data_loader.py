@@ -11,14 +11,6 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-# Add ``src`` to ``sys.path`` so the module can be executed directly
-import sys
-from pathlib import Path as _Path
-_current_dir = _Path(__file__).parent
-_src_dir = _current_dir.parent
-if str(_src_dir) not in sys.path:
-    sys.path.insert(0, str(_src_dir))
-
 from tokenization.character_tokenizer import CharacterTokenizer
 from utils.logger import get_logger
 

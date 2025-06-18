@@ -18,26 +18,18 @@ every position in the sequence. During training we minimize cross entropy
 loss between these predictions and the actual next characters.
 """
 
-import os
-import sys
 import math
-from pathlib import Path
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Add src to path for imports
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
-
 from utils.logger import get_logger
 from utils.config import ModelConfig
 
 logger = get_logger(__name__)
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
@@ -65,9 +57,7 @@ class MultiHeadAttention(nn.Module):
         # Attention
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
         if mask is not None:
-            # Use dtype-safe minimum value to avoid overflow in float16
-            min_value = torch.finfo(scores.dtype).min
-            scores = scores.masked_fill(mask == 0, min_value)
+            scores = scores.masked_fill(mask == 0, torch.finfo(scores.dtype).min)
         
         attention = F.softmax(scores, dim=-1)
         attention = self.dropout(attention)
@@ -76,6 +66,7 @@ class MultiHeadAttention(nn.Module):
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
         
         return self.output(out)
+
 
 class TransformerBlock(nn.Module):
     def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
@@ -93,14 +84,11 @@ class TransformerBlock(nn.Module):
         
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         # Self-attention with residual connection
-        attn_out = self.attention(x, mask)
-        x = self.norm1(x + attn_out)
-        
+        x = self.norm1(x + self.attention(x, mask))
         # Feed-forward with residual connection
-        ff_out = self.feed_forward(x)
-        x = self.norm2(x + ff_out)
-        
+        x = self.norm2(x + self.feed_forward(x))
         return x
+
 
 class Transformer(nn.Module):
     def __init__(self, config: ModelConfig):
