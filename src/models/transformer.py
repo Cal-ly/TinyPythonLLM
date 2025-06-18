@@ -65,7 +65,9 @@ class MultiHeadAttention(nn.Module):
         # Attention
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            # Use dtype-safe minimum value to avoid overflow in float16
+            min_value = torch.finfo(scores.dtype).min
+            scores = scores.masked_fill(mask == 0, min_value)
         
         attention = F.softmax(scores, dim=-1)
         attention = self.dropout(attention)
@@ -104,64 +106,23 @@ class Transformer(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
+        self.max_seq_length = config.sequence_length
+        
         self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
         self.position_embedding = nn.Embedding(config.sequence_length, config.d_model)
+        self.dropout = nn.Dropout(config.dropout)
         
         self.blocks = nn.ModuleList([
             TransformerBlock(config.d_model, config.num_heads, config.dropout)
             for _ in range(config.num_layers)
         ])
         
-        self.norm = nn.LayerNorm(config.d_model)
-        self.output = nn.Linear(config.d_model, config.vocab_size)
+        self.ln_final = nn.LayerNorm(config.d_model)
+        self.head = nn.Linear(config.d_model, config.vocab_size)
         
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, seq_len = x.shape
+        # Initialize weights
+        self.apply(self._init_weights)
         
-        # Token embeddings
-        token_emb = self.token_embedding(x)
-        
-        # Position embeddings
-        positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
-        pos_emb = self.position_embedding(positions)
-        
-        # Combine embeddings
-        x = token_emb + pos_emb
-        
-        # Causal mask for autoregressive generation
-        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).unsqueeze(0).unsqueeze(0)
-        
-        # Pass through transformer blocks
-        for block in self.blocks:
-            x = block(x, mask)
-            
-        x = self.norm(x)
-        return self.output(x)
-    
-    def generate(self, input_ids: torch.Tensor, max_length: int = 100, temperature: float = 1.0) -> torch.Tensor:
-        """Generate text autoregressively."""
-        self.eval()
-        with torch.no_grad():
-            for _ in range(max_length):
-                # Get predictions for the current sequence
-                logits = self.forward(input_ids)
-                
-                # Get the logits for the last token
-                next_token_logits = logits[:, -1, :] / temperature
-                
-                # Sample from the distribution
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-                
-                # Append to the sequence
-                input_ids = torch.cat([input_ids, next_token], dim=1)
-                
-                # Truncate if necessary to maintain sequence length
-                if input_ids.shape[1] > self.config.sequence_length:
-                    input_ids = input_ids[:, -self.config.sequence_length:]
-                    
-        return input_ids
-    
     def _init_weights(self, module):
         """Initialize weights with optimal values for training"""
         if isinstance(module, nn.Linear):

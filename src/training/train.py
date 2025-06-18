@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 
 # Add src to path for imports
 current_dir = Path(__file__).parent
@@ -61,7 +61,7 @@ def train_epoch(model: Transformer, train_loader: DataLoader, optimizer: optim.O
         total_loss += loss.item()
         num_batches += 1
         
-        if batch_idx % 100 == 0:
+        if batch_idx % 100== 0:
             logger.info(f"Batch {batch_idx}, Loss: {loss.item():.4f}")
     
     return total_loss / num_batches
@@ -137,7 +137,7 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
     )
 
     criterion = nn.CrossEntropyLoss()
-    scaler = GradScaler() if device.type == "cuda" else None
+    scaler = GradScaler('cuda') if device.type == "cuda" else None
 
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -167,7 +167,7 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
             optimizer.zero_grad(set_to_none=True)
 
             if scaler:
-                with autocast():
+                with autocast('cuda'):
                     outputs = model(inputs)
                     loss = criterion(outputs.view(-1, tokenizer.vocab_size), targets.view(-1))
                 scaler.scale(loss).backward()
@@ -178,12 +178,12 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
                 loss = criterion(outputs.view(-1, tokenizer.vocab_size), targets.view(-1))
                 loss.backward()
                 optimizer.step()
-
+            
             epoch_loss += loss.item()
             num_batches += 1
             tokens_processed += inputs.numel()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 1000 == 0:
                 lr = optimizer.param_groups[0]["lr"]
                 logger.info(
                     f"Epoch {epoch + 1}/{config.max_epochs}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}, LR: {lr:.6f}"
@@ -199,7 +199,7 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
                 targets = targets.to(device, non_blocking=True)
 
                 if scaler:
-                    with autocast():
+                    with autocast('cuda'):
                         outputs = model(inputs)
                         loss = criterion(outputs.view(-1, tokenizer.vocab_size), targets.view(-1))
                 else:
@@ -208,7 +208,7 @@ def run_training(data_path: str, config: TrainingConfig, save_dir: Optional[str]
 
                 val_loss += loss.item()
                 val_batches += 1
-
+        
         scheduler.step()
 
         # Metrics
