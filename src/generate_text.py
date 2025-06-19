@@ -26,7 +26,15 @@ def load_model(model_path: str) -> Tuple[Transformer, CharacterTokenizer]:
             else:
                 raise FileNotFoundError(f"No model files found in {model_path}")
     
-    checkpoint = torch.load(model_file, map_location="cpu")
+    # Load model checkpoint
+    # Note: We use weights_only=False because our checkpoints contain
+    # CharacterTokenizer objects which are safe (we created them)
+    try:
+        checkpoint = torch.load(model_file, map_location="cpu", weights_only=False)
+    except TypeError:
+        # Fallback for older PyTorch versions that don't support weights_only parameter
+        checkpoint = torch.load(model_file, map_location="cpu")
+    
     config = checkpoint["config"]
     model = Transformer(config)
     model.load_state_dict(checkpoint["model_state_dict"])

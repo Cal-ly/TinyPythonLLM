@@ -90,15 +90,14 @@ class TinyLLMConsole:
         logger.info(f"Loading model from {model_file}")
         print(f"Loading model: {model_file}")
         
-        # Handle PyTorch 2.6+ security changes
+        # Load model checkpoint
+        # Note: We use weights_only=False because our checkpoints contain
+        # CharacterTokenizer objects which are safe (we created them)
         try:
             checkpoint = torch.load(model_file, map_location=self.device, weights_only=False)
-        except Exception as e:
-            logger.error(f"Failed to load with weights_only=False: {e}")
-            try:
-                checkpoint = torch.load(model_file, map_location=self.device)
-            except Exception as e2:
-                raise RuntimeError(f"Failed to load model: {e2}")
+        except TypeError:
+            # Fallback for older PyTorch versions that don't support weights_only parameter
+            checkpoint = torch.load(model_file, map_location=self.device)
         
         # Reconstruct model
         self.config = checkpoint['config']
