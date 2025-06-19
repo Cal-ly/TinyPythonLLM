@@ -35,8 +35,8 @@ def setup_logger(
     Returns:
         Configured logger instance
     """
-    # Get project root directory (3 levels up from this file)
-    project_root = Path(__file__).parent.parent.parent
+    # Get project root directory (2 levels up from this file)
+    project_root = Path(__file__).parent.parent
     
     # Create logs directory if it doesn't exist
     logs_dir = project_root / "logs"
